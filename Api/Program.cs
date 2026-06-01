@@ -147,6 +147,25 @@ builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
     opt.ServerAddress = "0.0.0.0";
     opt.Port = builder.Configuration.GetValue("Ftp:Port", 2121);
 });
+builder.Services.AddSingleton<IPasvAddressResolver>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var minPort = config.GetValue("Ftp:PasvMinPort", 50000);
+    var maxPort = config.GetValue("Ftp:PasvMaxPort", 50100);
+    System.Net.IPAddress? publicIp = null;
+    var publicAddress = config["Ftp:PublicAddress"];
+    if (string.IsNullOrEmpty(publicAddress))
+        publicAddress = config["Ftp:PublicHostname"];
+    if (!string.IsNullOrEmpty(publicAddress))
+    {
+        if (!System.Net.IPAddress.TryParse(publicAddress, out publicIp))
+        {
+            try { publicIp = System.Net.Dns.GetHostAddresses(publicAddress).FirstOrDefault(); }
+            catch { /* ignore */ }
+        }
+    }
+    return new Api.Ftp.SimplePasvAddressResolver(minPort, maxPort, publicIp);
+});
 builder.Services.AddSingleton<IFileSystemClassFactory, EncryptedFileSystemProvider>();
 builder.Services.AddSingleton<IMembershipProvider, EncryptedMembershipProvider>();
 
