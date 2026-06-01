@@ -170,6 +170,8 @@ else
     protected override async Task OnParametersSetAsync()
     {
         if (!Auth.IsAuthenticated) return;
+        _listing = null; // Show loading spinner while fetching
+        StateHasChanged();
         await LoadAsync();
     }
 
