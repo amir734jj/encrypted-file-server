@@ -119,7 +119,8 @@ else
         </div>
         <div class="row g-2 mb-3">
             <div class="col-6"><HxInputText Label="Username" @bind-Value="_backendUser" /></div>
-            <div class="col-6"><HxInputText Label="Password" @bind-Value="_backendPass" Type="InputType.Password" /></div>
+            <div class="col-6"><HxInputText Label="Password" @bind-Value="_backendPass" Type="InputType.Password"
+                                             Placeholder="@(_editId.HasValue ? "(unchanged)" : "")" /></div>
         </div>
         <div class="mb-3">
             <HxInputText Label="Base Path" @bind-Value="_backendPath" Placeholder="backup"
@@ -138,7 +139,8 @@ else
         }
         <div class="mb-3">
             <HxInputText Label="Master Password" @bind-Value="_masterPassword" Type="InputType.Password"
-                         Hint="Encryption key for files. Use the same password to re-attach to existing backends." />
+                         Placeholder="@(_editId.HasValue ? "(unchanged)" : "")"
+                         Hint="@(_editId.HasValue ? "Leave blank to keep current password." : "Encryption key for files. Use the same password to re-attach to existing backends.")" />
         </div>
 
         <h6 class="text-muted mb-2 mt-4">Frontend Access</h6>
