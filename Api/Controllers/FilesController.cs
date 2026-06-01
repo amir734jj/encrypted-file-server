@@ -136,38 +136,6 @@ public sealed class FilesController(
         return File(stream, contentType, fileName);
     }
 
-    [HttpPost("{id:guid}/decrypt")]
-    public async Task<IActionResult> Decrypt(Guid id)
-    {
-        var file = await GetOwnedFile(id);
-        if (file is null) return NotFound();
-
-        var ds = await GetDataSource(file.DataSourceId);
-        if (ds is null) return NotFound();
-        var currentMethod = file.EncryptionMethod ?? ds.Backend.EncryptionMethod;
-        if (currentMethod == EncryptionMethod.None)
-            return BadRequest("File is already unencrypted.");
-
-        var updated = await fileStorage.DecryptFileAsync(file);
-        return Ok(ToDto(updated, ds));
-    }
-
-    [HttpPost("{id:guid}/reencrypt")]
-    public async Task<IActionResult> ReEncrypt(Guid id, [FromQuery] EncryptionMethod method)
-    {
-        var file = await GetOwnedFile(id);
-        if (file is null) return NotFound();
-
-        var ds = await GetDataSource(file.DataSourceId);
-        if (ds is null) return NotFound();
-        var currentMethod = file.EncryptionMethod ?? ds.Backend.EncryptionMethod;
-        if (currentMethod == method)
-            return BadRequest($"File is already encrypted with {method}.");
-
-        var updated = await fileStorage.ReEncryptFileAsync(file, method);
-        return Ok(ToDto(updated, ds));
-    }
-
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -225,26 +193,5 @@ public sealed class FilesController(
         if (string.IsNullOrWhiteSpace(path)) return string.Empty;
         path = path.Replace('\\', '/').Trim('/');
         return path.Length > 0 ? path + "/" : string.Empty;
-    }
-
-    private async Task<EncryptedFile?> GetOwnedFile(Guid id)
-    {
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.Id == id && f.UserId == CurrentUserId],
-            project: f => f,
-            maxResults: 1)).ToList();
-        return files.FirstOrDefault();
-    }
-
-    private FileEntryDto ToDto(EncryptedFile file, DataSource ds)
-    {
-        var encryption = encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var iv = Convert.FromBase64String(file.IvBase64);
-        return new FileEntryDto(
-            file.Id, file.DataSourceId,
-            encryption.DecryptString(file.OriginalFileName, masterKey, iv),
-            file.ContentType is not null ? encryption.DecryptString(file.ContentType, masterKey, iv) : null,
-            file.OriginalFileSize, file.CreatedAt, file.UpdatedAt);
     }
 }
