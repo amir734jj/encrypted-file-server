@@ -39,17 +39,16 @@ public sealed class FileStorageService(
         var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, relativePath);
 
         byte[] iv;
+        long originalSize = 0;
         await using (destinationStream)
         {
             var (cryptoStream, fileIv) = encryption.CreateEncryptingStream(destinationStream, masterKey);
             iv = fileIv;
             await using (cryptoStream)
             {
-                await content.CopyToAsync(cryptoStream);
+                originalSize = await CopyAndCountAsync(content, cryptoStream);
             }
         }
-
-        long originalSize = content.CanSeek ? content.Length : 0;
 
         var entity = await FileDal.Save(new EncryptedFile
         {
@@ -281,5 +280,18 @@ public sealed class FileStorageService(
         if (dataSources.Count == 0)
             throw new InvalidOperationException("Data source not found.");
         return dataSources.First();
+    }
+
+    private static async Task<long> CopyAndCountAsync(Stream source, Stream destination, int bufferSize = 81920)
+    {
+        var buffer = new byte[bufferSize];
+        long total = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer)) > 0)
+        {
+            await destination.WriteAsync(buffer.AsMemory(0, read));
+            total += read;
+        }
+        return total;
     }
 }

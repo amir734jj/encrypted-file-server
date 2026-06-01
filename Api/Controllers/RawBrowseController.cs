@@ -1,8 +1,9 @@
 using System.Text;
-using System.Web;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using Api.Services;
+using Api.ViewModels;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -15,6 +16,7 @@ namespace Api.Controllers;
 public sealed class RawBrowseController(
     IEfRepository repository,
     IFileStorageService fileStorage,
+    ITemplateService templateService,
     UserManager<User> userManager) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
@@ -35,8 +37,21 @@ public sealed class RawBrowseController(
             filterExprs: [d => d.UserId == userId],
             project: d => d)).Where(d => d.HasFrontend(FrontendType.Http)).OrderBy(d => d.Name).ToList();
 
-        return Content(RenderPage("/ - Raw Storage", "/raw",
-            dataSources.Select(ds => (ds.Name, $"/raw/{ds.Id}/", (long?)null, (DateTimeOffset?)ds.CreatedAt))), "text/html");
+        var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
+        {
+            Title = "/ - Raw Storage",
+            CurrentPath = "/raw",
+            AccentColor = "#ff6b6b",
+            AccentColorLight = "#cc3333",
+            Entries = dataSources.Select(ds => new EntryViewModel
+            {
+                Name = ds.Name,
+                Href = $"/raw/{ds.Id}/",
+                Size = null,
+                Modified = ds.CreatedAt
+            }).ToList()
+        });
+        return Content(html, "text/html");
     }
 
     [HttpGet("{dataSourceId:guid}/{**path}")]
@@ -69,7 +84,7 @@ public sealed class RawBrowseController(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
             project: f => f)).ToList();
 
-        var entries = new List<(string Name, string Href, long? Size, DateTimeOffset? Modified)>();
+        var entries = new List<EntryViewModel>();
 
         foreach (var f in allFiles)
         {
@@ -77,16 +92,32 @@ public sealed class RawBrowseController(
             if (string.IsNullOrEmpty(storageName))
                 storageName = f.Id.ToString();
 
-            var displayName = $"{storageName}  (id: {f.Id})";
-            var href = $"/raw/{dataSourceId}/{f.Id}";
-            entries.Add((displayName, href, f.OriginalFileSize, f.CreatedAt));
+            entries.Add(new EntryViewModel
+            {
+                Name = storageName,
+                Href = $"/raw/{dataSourceId}/{f.Id}",
+                Size = f.OriginalFileSize,
+                Modified = f.CreatedAt
+            });
         }
 
         entries = entries.OrderBy(e => e.Name).ToList();
 
         var displayPath = $"/{ds!.Name}/ (raw)";
-        return Content(RenderPage($"{displayPath} - Raw Storage",
-            $"/raw/{dataSourceId}/", entries, "/raw/"), "text/html");
+        var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
+        {
+            Title = $"{displayPath} - Raw Storage",
+            CurrentPath = $"/raw/{dataSourceId}/",
+            Entries = entries,
+            ParentHref = "/raw/",
+            Badge = "RAW",
+            Subtitle = "Showing raw storage files. Downloads are served as-is without decryption.",
+            NameHeader = "Storage Name",
+            DateHeader = "Created",
+            AccentColor = "#ff6b6b",
+            AccentColorLight = "#cc3333"
+        });
+        return Content(html, "text/html");
     }
 
     private async Task<Guid?> ResolveUserId()
@@ -175,89 +206,6 @@ public sealed class RawBrowseController(
         Response.Headers["WWW-Authenticate"] = $"Basic realm=\"{ds.Name}\"";
         return (null, Unauthorized());
     }
-
-    private static string RenderPage(string title, string currentPath,
-        IEnumerable<(string Name, string Href, long? Size, DateTimeOffset? Modified)> entries,
-        string? parentHref = null)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("<!DOCTYPE html>");
-        sb.AppendLine("<html><head>");
-        sb.AppendLine($"<title>{HttpUtility.HtmlEncode(title)}</title>");
-        sb.AppendLine("<meta charset=\"utf-8\">");
-        sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-        sb.AppendLine("<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">");
-        sb.AppendLine("<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>");
-        sb.AppendLine("<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap\" rel=\"stylesheet\">");
-        sb.AppendLine("<style>");
-        sb.AppendLine(":root { --bg: #1a1a2e; --bg-hover: #16213e; --text: #e0e0e0; --heading: #ff6b6b; --link: #ff6b6b; --muted: #888; --dim: #666; --border: #333; }");
-        sb.AppendLine("[data-theme='light'] { --bg: #f5f5f5; --bg-hover: #e8e8e8; --text: #1a1a1a; --heading: #cc3333; --link: #cc3333; --muted: #666; --dim: #999; --border: #ddd; }");
-        sb.AppendLine("body { font-family: 'JetBrains Mono', monospace; margin: 2em; background: var(--bg); color: var(--text); transition: background 0.2s, color 0.2s; }");
-        sb.AppendLine("h1 { font-size: 1.4em; color: var(--heading); border-bottom: 1px solid var(--border); padding-bottom: 0.5em; }");
-        sb.AppendLine("table { border-collapse: collapse; width: 100%; }");
-        sb.AppendLine("th, td { text-align: left; padding: 4px 12px; }");
-        sb.AppendLine("th { color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--border); }");
-        sb.AppendLine("tr:hover { background: var(--bg-hover); }");
-        sb.AppendLine("a { color: var(--link); text-decoration: none; }");
-        sb.AppendLine("a:hover { text-decoration: underline; }");
-        sb.AppendLine(".size { color: var(--muted); text-align: right; }");
-        sb.AppendLine(".date { color: var(--dim); }");
-        sb.AppendLine(".header { display: flex; justify-content: space-between; align-items: center; }");
-        sb.AppendLine(".badge { background: var(--heading); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; margin-left: 8px; }");
-        sb.AppendLine(".theme-btn { background: none; border: 1px solid var(--border); color: var(--text); cursor: pointer; padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 0.85em; }");
-        sb.AppendLine(".theme-btn:hover { background: var(--bg-hover); }");
-        sb.AppendLine("</style>");
-        sb.AppendLine("</head><body>");
-        sb.AppendLine("<div class=\"header\">");
-        sb.AppendLine($"<h1>Index of {HttpUtility.HtmlEncode(currentPath)} <span class=\"badge\">RAW</span></h1>");
-        sb.AppendLine("<button class=\"theme-btn\" onclick=\"toggleTheme()\" id=\"themeBtn\">☀️ Light</button>");
-        sb.AppendLine("</div>");
-        sb.AppendLine("<p style=\"color: var(--muted); font-size: 0.85em; margin-bottom: 1em;\">Showing raw storage files. Downloads are served as-is without decryption.</p>");
-        sb.AppendLine("<table>");
-        sb.AppendLine("<tr><th>Storage Name</th><th class=\"size\">Size</th><th class=\"date\">Created</th></tr>");
-
-        if (parentHref is not null)
-            sb.AppendLine($"<tr><td><a href=\"{parentHref}\">../</a></td><td class=\"size\">-</td><td class=\"date\">-</td></tr>");
-
-        foreach (var (name, href, size, modified) in entries)
-        {
-            var isDir = href.EndsWith('/');
-            var displayName = isDir ? $"{HttpUtility.HtmlEncode(name)}/" : HttpUtility.HtmlEncode(name);
-            var sizeStr = size.HasValue ? FormatSize(size.Value) : "-";
-            var dateStr = modified.HasValue ? modified.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm") : "-";
-            sb.AppendLine($"<tr><td><a href=\"{href}\">{displayName}</a></td><td class=\"size\">{sizeStr}</td><td class=\"date\">{dateStr}</td></tr>");
-        }
-
-        sb.AppendLine("</table>");
-        sb.AppendLine("<script>");
-        sb.AppendLine("function toggleTheme() {");
-        sb.AppendLine("  var html = document.documentElement;");
-        sb.AppendLine("  var current = html.getAttribute('data-theme');");
-        sb.AppendLine("  var next = current === 'light' ? 'dark' : 'light';");
-        sb.AppendLine("  html.setAttribute('data-theme', next);");
-        sb.AppendLine("  localStorage.setItem('browse-theme', next);");
-        sb.AppendLine("  updateBtn(next);");
-        sb.AppendLine("}");
-        sb.AppendLine("function updateBtn(t) {");
-        sb.AppendLine("  document.getElementById('themeBtn').textContent = t === 'light' ? '\\u{1F319} Dark' : '\\u{2600}\\u{FE0F} Light';");
-        sb.AppendLine("}");
-        sb.AppendLine("(function() {");
-        sb.AppendLine("  var saved = localStorage.getItem('browse-theme') || 'dark';");
-        sb.AppendLine("  document.documentElement.setAttribute('data-theme', saved);");
-        sb.AppendLine("  updateBtn(saved);");
-        sb.AppendLine("})();");
-        sb.AppendLine("</script>");
-        sb.AppendLine("</body></html>");
-        return sb.ToString();
-    }
-
-    private static string FormatSize(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} B",
-        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
-        _ => $"{bytes / (1024.0 * 1024 * 1024):F1} GB"
-    };
 
     private static string NormalizePath(string? path)
     {

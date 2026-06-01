@@ -1,8 +1,9 @@
 using System.Text;
-using System.Web;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using Api.Services;
+using Api.ViewModels;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -11,12 +12,12 @@ using Shared.Models;
 
 namespace Api.Controllers;
 
-[ApiController]
 [Route("browse")]
 public sealed class BrowseController(
     IEfRepository repository,
     IFileStorageService fileStorage,
     IEncryptionProviderFactory encryptionFactory,
+    ITemplateService templateService,
     UserManager<User> userManager) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
@@ -44,8 +45,19 @@ public sealed class BrowseController(
             filterExprs: [d => d.UserId == userId],
             project: d => d)).Where(d => d.HasFrontend(FrontendType.Http)).OrderBy(d => d.Name).ToList();
 
-        return Content(RenderDirectoryPage("/ - File Server", "/browse",
-            dataSources.Select(ds => (ds.Name, $"/browse/{ds.Id}/", (string?)null, (long?)null, (DateTimeOffset?)ds.CreatedAt))), "text/html");
+        var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
+        {
+            Title = "/ - File Server",
+            CurrentPath = "/browse",
+            Entries = dataSources.Select(ds => new EntryViewModel
+            {
+                Name = ds.Name,
+                Href = $"/browse/{ds.Id}/",
+                Size = null,
+                Modified = ds.CreatedAt
+            }).ToList()
+        });
+        return Content(html, "text/html");
     }
 
     [HttpGet("{dataSourceId:guid}/{**path}")]
@@ -95,7 +107,7 @@ public sealed class BrowseController(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
             project: f => f)).ToList();
 
-        var entries = new List<(string Name, string Href, string? RawHref, long? Size, DateTimeOffset? Modified)>();
+        var entries = new List<EntryViewModel>();
         var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var f in allFiles)
@@ -114,14 +126,24 @@ public sealed class BrowseController(
             {
                 var isFileEncrypted = (f.EncryptionMethod ?? defaultMethod) != EncryptionMethod.None;
                 var href = $"/browse/{dataSourceId}/{path}{f.Id}";
-                var rawHref = isFileEncrypted ? $"{href}?raw=true" : null;
-                entries.Add((relativePath, href, rawHref, f.OriginalFileSize, f.CreatedAt));
+                entries.Add(new EntryViewModel
+                {
+                    Name = relativePath,
+                    Href = href,
+                    RawHref = isFileEncrypted ? $"{href}?raw=true" : null,
+                    Size = f.OriginalFileSize,
+                    Modified = f.CreatedAt
+                });
             }
             else
             {
                 var folderName = relativePath[..slashIndex];
                 if (seenFolders.Add(folderName))
-                    entries.Add((folderName, $"/browse/{dataSourceId}/{path}{folderName}/", null, null, null));
+                    entries.Add(new EntryViewModel
+                    {
+                        Name = folderName,
+                        Href = $"/browse/{dataSourceId}/{path}{folderName}/"
+                    });
             }
         }
 
@@ -135,8 +157,14 @@ public sealed class BrowseController(
             ? "/browse/"
             : $"/browse/{dataSourceId}/{GetParentPath(path)}";
 
-        return Content(RenderDirectoryPage($"{displayPath} - File Server",
-            $"/browse/{dataSourceId}/{path}", entries, parentHref), "text/html");
+        var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
+        {
+            Title = $"{displayPath} - File Server",
+            CurrentPath = $"/browse/{dataSourceId}/{path}",
+            Entries = entries,
+            ParentHref = parentHref
+        });
+        return Content(html, "text/html");
     }
 
     private Guid? GetAuthenticatedUserId()
@@ -238,98 +266,6 @@ public sealed class BrowseController(
         Response.Headers["WWW-Authenticate"] = $"Basic realm=\"{ds.Name}\"";
         return (null, null, Unauthorized());
     }
-
-    private static string RenderDirectoryPage(string title, string currentPath,
-        IEnumerable<(string Name, string Href, string? RawHref, long? Size, DateTimeOffset? Modified)> entries,
-        string? parentHref = null)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("<!DOCTYPE html>");
-        sb.AppendLine("<html><head>");
-        sb.AppendLine($"<title>{HttpUtility.HtmlEncode(title)}</title>");
-        sb.AppendLine("<meta charset=\"utf-8\">");
-        sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-        sb.AppendLine("<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">");
-        sb.AppendLine("<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>");
-        sb.AppendLine("<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap\" rel=\"stylesheet\">");
-        sb.AppendLine("<style>");
-        sb.AppendLine(":root { --bg: #1a1a2e; --bg-hover: #16213e; --text: #e0e0e0; --heading: #00d4ff; --link: #00d4ff; --muted: #888; --dim: #666; --border: #333; }");
-        sb.AppendLine("[data-theme='light'] { --bg: #f5f5f5; --bg-hover: #e8e8e8; --text: #1a1a1a; --heading: #0066cc; --link: #0066cc; --muted: #666; --dim: #999; --border: #ddd; }");
-        sb.AppendLine("body { font-family: 'JetBrains Mono', monospace; margin: 2em; background: var(--bg); color: var(--text); transition: background 0.2s, color 0.2s; }");
-        sb.AppendLine("h1 { font-size: 1.4em; color: var(--heading); border-bottom: 1px solid var(--border); padding-bottom: 0.5em; }");
-        sb.AppendLine("table { border-collapse: collapse; width: 100%; }");
-        sb.AppendLine("th, td { text-align: left; padding: 4px 12px; }");
-        sb.AppendLine("th { color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--border); }");
-        sb.AppendLine("tr:hover { background: var(--bg-hover); }");
-        sb.AppendLine("a { color: var(--link); text-decoration: none; }");
-        sb.AppendLine("a:hover { text-decoration: underline; }");
-        sb.AppendLine(".size { color: var(--muted); text-align: right; }");
-        sb.AppendLine(".date { color: var(--dim); }");
-        sb.AppendLine(".header { display: flex; justify-content: space-between; align-items: center; }");
-        sb.AppendLine(".theme-btn { background: none; border: 1px solid var(--border); color: var(--text); cursor: pointer; padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 0.85em; }");
-        sb.AppendLine(".theme-btn:hover { background: var(--bg-hover); }");
-        sb.AppendLine(".raw { color: var(--muted); font-size: 0.85em; }");
-        sb.AppendLine(".raw a { color: var(--muted); }");
-        sb.AppendLine(".raw a:hover { color: var(--link); }");
-        sb.AppendLine("</style>");
-        sb.AppendLine("</head><body>");
-        sb.AppendLine("<div class=\"header\">");
-        sb.AppendLine($"<h1>Index of {HttpUtility.HtmlEncode(currentPath)}</h1>");
-        sb.AppendLine("<button class=\"theme-btn\" onclick=\"toggleTheme()\" id=\"themeBtn\">☀️ Light</button>");
-        sb.AppendLine("</div>");
-        sb.AppendLine("<table>");
-        var hasAnyRaw = entries.Any(e => e.RawHref is not null);
-        var rawHeader = hasAnyRaw ? "<th class=\"raw\">Raw</th>" : "";
-        sb.AppendLine($"<tr><th>Name</th><th class=\"size\">Size</th><th class=\"date\">Modified</th>{rawHeader}</tr>");
-
-        if (parentHref is not null)
-        {
-            var rawCell = hasAnyRaw ? "<td class=\"raw\"></td>" : "";
-            sb.AppendLine($"<tr><td><a href=\"{parentHref}\">../</a></td><td class=\"size\">-</td><td class=\"date\">-</td>{rawCell}</tr>");
-        }
-
-        foreach (var (name, href, rawHref, size, modified) in entries)
-        {
-            var isDir = href.EndsWith('/');
-            var displayName = isDir ? $"{HttpUtility.HtmlEncode(name)}/" : HttpUtility.HtmlEncode(name);
-            var sizeStr = size.HasValue ? FormatSize(size.Value) : "-";
-            var dateStr = modified.HasValue ? modified.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm") : "-";
-            var rawCell = hasAnyRaw
-                ? $"<td class=\"raw\">{(rawHref is not null ? $"<a href=\"{rawHref}\" title=\"Download raw encrypted file\">raw</a>" : "")}</td>"
-                : "";
-            sb.AppendLine($"<tr><td><a href=\"{href}\">{displayName}</a></td><td class=\"size\">{sizeStr}</td><td class=\"date\">{dateStr}</td>{rawCell}</tr>");
-        }
-
-        sb.AppendLine("</table>");
-        sb.AppendLine("<script>");
-        sb.AppendLine("function toggleTheme() {");
-        sb.AppendLine("  var html = document.documentElement;");
-        sb.AppendLine("  var current = html.getAttribute('data-theme');");
-        sb.AppendLine("  var next = current === 'light' ? 'dark' : 'light';");
-        sb.AppendLine("  html.setAttribute('data-theme', next);");
-        sb.AppendLine("  localStorage.setItem('browse-theme', next);");
-        sb.AppendLine("  updateBtn(next);");
-        sb.AppendLine("}");
-        sb.AppendLine("function updateBtn(t) {");
-        sb.AppendLine("  document.getElementById('themeBtn').textContent = t === 'light' ? '\\u{1F319} Dark' : '\\u{2600}\\u{FE0F} Light';");
-        sb.AppendLine("}");
-        sb.AppendLine("(function() {");
-        sb.AppendLine("  var saved = localStorage.getItem('browse-theme') || 'dark';");
-        sb.AppendLine("  document.documentElement.setAttribute('data-theme', saved);");
-        sb.AppendLine("  updateBtn(saved);");
-        sb.AppendLine("})();");
-        sb.AppendLine("</script>");
-        sb.AppendLine("</body></html>");
-        return sb.ToString();
-    }
-
-    private static string FormatSize(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} B",
-        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
-        _ => $"{bytes / (1024.0 * 1024 * 1024):F1} GB"
-    };
 
     private static string NormalizePath(string? path)
     {

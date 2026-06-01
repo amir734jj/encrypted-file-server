@@ -133,6 +133,7 @@ builder.Services.AddSingleton<IEncryptionProvider, AesGcmEncryptionProvider>();
 builder.Services.AddSingleton<IEncryptionProvider, ChaCha20EncryptionProvider>();
 builder.Services.AddSingleton<IEncryptionProvider, NoneEncryptionProvider>();
 builder.Services.AddSingleton<Api.Interfaces.IEncryptionProviderFactory, EncryptionProviderFactory>();
+builder.Services.AddSingleton<Api.Services.ITemplateService, Api.Services.TemplateService>();
 builder.Services.AddSingleton<IBackendStorageProvider, FtpBackendStorageProvider>();
 builder.Services.AddSingleton<IBackendStorageProvider, Api.Services.Backend.SftpBackendStorageProvider>();
 builder.Services.AddSingleton<IBackendStorageProviderFactory, Api.Services.Backend.BackendStorageProviderFactory>();
