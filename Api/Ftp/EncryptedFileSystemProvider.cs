@@ -72,8 +72,11 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         return _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
     }
 
-    private string DecryptFileName(EncryptedFile f, byte[] masterKey, IEncryptionProvider encryption)
+    private string DecryptFileName(EncryptedFile f, byte[] masterKey, IEncryptionProvider defaultEncryption)
     {
+        var encryption = f.EncryptionMethod.HasValue
+            ? _encryptionFactory.GetProvider(f.EncryptionMethod.Value)
+            : defaultEncryption;
         var iv = Convert.FromBase64String(f.IvBase64);
         return encryption.DecryptString(f.OriginalFileName, masterKey, iv);
     }

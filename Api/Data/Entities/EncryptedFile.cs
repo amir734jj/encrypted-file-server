@@ -1,4 +1,5 @@
 using Api.Interfaces;
+using Shared.Models;
 
 namespace Api.Data.Entities;
 
@@ -15,7 +16,13 @@ public sealed class EncryptedFile : IEntity
     public long OriginalFileSize { get; set; }
 
     /// <summary>
-    /// Base64-encoded AES IV used to encrypt this file.
+    /// The encryption method used for this specific file.
+    /// Falls back to the data source default for legacy files that don't have this set.
+    /// </summary>
+    public EncryptionMethod? EncryptionMethod { get; set; }
+
+    /// <summary>
+    /// Base64-encoded IV/nonce used to encrypt this file.
     /// </summary>
     public string IvBase64 { get; set; } = string.Empty;
 

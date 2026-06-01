@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Contracts;
 using Shared.Interfaces;
+using Shared.Models;
 
 namespace Api.Controllers;
 
@@ -27,7 +28,7 @@ public sealed class FilesController(
         var ds = await GetDataSource(dataSourceId);
         if (ds is null) return NotFound();
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var defaultMethod = ds.Backend.EncryptionMethod;
 
         path = NormalizePath(path);
 
@@ -37,6 +38,7 @@ public sealed class FilesController(
 
         var decrypted = allFiles.Select(f =>
         {
+            var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
             var iv = Convert.FromBase64String(f.IvBase64);
             var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
             var contentType = f.ContentType is not null
@@ -96,8 +98,8 @@ public sealed class FilesController(
         var entity = await fileStorage.StoreFileAsync(
             CurrentUserId, dataSourceId, fullPath, file.ContentType, stream);
 
-        var ds = await GetDataSource(dataSourceId);
-        var encryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
+        var ds = (await GetDataSource(dataSourceId))!;
+        var encryption = encryptionFactory.GetProvider(entity.EncryptionMethod ?? ds.Backend.EncryptionMethod);
         var iv = Convert.FromBase64String(entity.IvBase64);
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
 
@@ -120,7 +122,7 @@ public sealed class FilesController(
         var file = files.First();
         var ds = await GetDataSource(file.DataSourceId);
         if (ds is null) return NotFound();
-        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
 
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var iv = Convert.FromBase64String(file.IvBase64);
@@ -132,6 +134,38 @@ public sealed class FilesController(
             : "application/octet-stream";
 
         return File(stream, contentType, fileName);
+    }
+
+    [HttpPost("{id:guid}/decrypt")]
+    public async Task<IActionResult> Decrypt(Guid id)
+    {
+        var file = await GetOwnedFile(id);
+        if (file is null) return NotFound();
+
+        var ds = await GetDataSource(file.DataSourceId);
+        if (ds is null) return NotFound();
+        var currentMethod = file.EncryptionMethod ?? ds.Backend.EncryptionMethod;
+        if (currentMethod == EncryptionMethod.None)
+            return BadRequest("File is already unencrypted.");
+
+        var updated = await fileStorage.DecryptFileAsync(file);
+        return Ok(ToDto(updated, ds));
+    }
+
+    [HttpPost("{id:guid}/reencrypt")]
+    public async Task<IActionResult> ReEncrypt(Guid id, [FromQuery] EncryptionMethod method)
+    {
+        var file = await GetOwnedFile(id);
+        if (file is null) return NotFound();
+
+        var ds = await GetDataSource(file.DataSourceId);
+        if (ds is null) return NotFound();
+        var currentMethod = file.EncryptionMethod ?? ds.Backend.EncryptionMethod;
+        if (currentMethod == method)
+            return BadRequest($"File is already encrypted with {method}.");
+
+        var updated = await fileStorage.ReEncryptFileAsync(file, method);
+        return Ok(ToDto(updated, ds));
     }
 
     [HttpDelete("{id:guid}")]
@@ -157,7 +191,7 @@ public sealed class FilesController(
         var ds = await GetDataSource(dataSourceId);
         if (ds is null) return NotFound();
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var defaultMethod = ds.Backend.EncryptionMethod;
 
         var allFiles = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
@@ -165,6 +199,7 @@ public sealed class FilesController(
 
         var toDelete = allFiles.Where(f =>
         {
+            var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
             var iv = Convert.FromBase64String(f.IvBase64);
             var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
             return fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase);
@@ -190,5 +225,26 @@ public sealed class FilesController(
         if (string.IsNullOrWhiteSpace(path)) return string.Empty;
         path = path.Replace('\\', '/').Trim('/');
         return path.Length > 0 ? path + "/" : string.Empty;
+    }
+
+    private async Task<EncryptedFile?> GetOwnedFile(Guid id)
+    {
+        var files = (await FileDal.GetAll(
+            filterExprs: [f => f.Id == id && f.UserId == CurrentUserId],
+            project: f => f,
+            maxResults: 1)).ToList();
+        return files.FirstOrDefault();
+    }
+
+    private FileEntryDto ToDto(EncryptedFile file, DataSource ds)
+    {
+        var encryption = encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+        var iv = Convert.FromBase64String(file.IvBase64);
+        return new FileEntryDto(
+            file.Id, file.DataSourceId,
+            encryption.DecryptString(file.OriginalFileName, masterKey, iv),
+            file.ContentType is not null ? encryption.DecryptString(file.ContentType, masterKey, iv) : null,
+            file.OriginalFileSize, file.CreatedAt, file.UpdatedAt);
     }
 }

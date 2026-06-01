@@ -569,13 +569,13 @@ public sealed class SftpSubsystem : IDisposable
 
         // Re-encrypt the file name with the new path
         var masterKey = GetCachedMasterKey(ds);
-        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var encryption = _encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
         var iv = Convert.FromBase64String(file.IvBase64);
 
         file.OriginalFileName = encryption.EncryptString(newParts[1], masterKey, iv);
 
         // For None encryption, also rename the actual file on the backend
-        if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
+        if ((file.EncryptionMethod ?? ds.Backend.EncryptionMethod) == EncryptionMethod.None)
         {
             var connection = ds.ToBackendConnectionInfo();
             file.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, file.StoragePath, newParts[1]);
@@ -635,7 +635,7 @@ public sealed class SftpSubsystem : IDisposable
     private async Task<List<VfsEntry>> ListDirectoryAsync(DataSource ds, string pathPrefix)
     {
         var masterKey = GetCachedMasterKey(ds);
-        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var defaultMethod = ds.Backend.EncryptionMethod;
 
         var files = await _db.EncryptedFiles
             .Where(f => f.DataSourceId == ds.Id)
@@ -646,6 +646,7 @@ public sealed class SftpSubsystem : IDisposable
 
         foreach (var f in files)
         {
+            var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
             var iv = Convert.FromBase64String(f.IvBase64);
             var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
 
@@ -674,7 +675,7 @@ public sealed class SftpSubsystem : IDisposable
     private async Task<(VfsEntry? entry, EncryptedFile? file)> FindEntryAsync(DataSource ds, string subPath)
     {
         var masterKey = GetCachedMasterKey(ds);
-        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var defaultMethod = ds.Backend.EncryptionMethod;
 
         var files = await _db.EncryptedFiles
             .Where(f => f.DataSourceId == ds.Id)
@@ -683,6 +684,7 @@ public sealed class SftpSubsystem : IDisposable
         // Check for exact file match
         foreach (var f in files)
         {
+            var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
             var iv = Convert.FromBase64String(f.IvBase64);
             var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
 
@@ -694,8 +696,9 @@ public sealed class SftpSubsystem : IDisposable
         var dirPrefix = subPath.EndsWith('/') ? subPath : subPath + "/";
         var isDir = files.Any(f =>
         {
+            var enc = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
             var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+            var fullPath = enc.DecryptString(f.OriginalFileName, masterKey, iv);
             return fullPath.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase);
         });
 
@@ -707,7 +710,7 @@ public sealed class SftpSubsystem : IDisposable
     private async Task<EncryptedFile?> FindFileAsync(DataSource ds, string subPath)
     {
         var masterKey = GetCachedMasterKey(ds);
-        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var defaultMethod = ds.Backend.EncryptionMethod;
 
         var files = await _db.EncryptedFiles
             .Where(f => f.DataSourceId == ds.Id)
@@ -715,6 +718,7 @@ public sealed class SftpSubsystem : IDisposable
 
         foreach (var f in files)
         {
+            var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
             var iv = Convert.FromBase64String(f.IvBase64);
             var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
             if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))

@@ -1,4 +1,5 @@
 using Api.Data.Entities;
+using Shared.Models;
 
 namespace Api.Interfaces;
 
@@ -9,6 +10,8 @@ public interface IFileStorageService
     Task<Stream> OpenDecryptedStreamAsync(EncryptedFile file);
     Task<Stream> OpenRawStreamAsync(EncryptedFile file);
     Task<bool> DeleteFileAsync(EncryptedFile file);
+    Task<EncryptedFile> DecryptFileAsync(EncryptedFile file);
+    Task<EncryptedFile> ReEncryptFileAsync(EncryptedFile file, EncryptionMethod newMethod);
 }
 
 /// <summary>

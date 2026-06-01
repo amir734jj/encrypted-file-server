@@ -6,6 +6,7 @@
 @inject IHxMessengerService Messenger
 @inject IHxMessageBoxService MessageBox
 @inject IJSRuntime JS
+@using Shared.Models
 
 @if (!Auth.IsAuthenticated)
 {
@@ -139,6 +140,14 @@ else
                             <HxButton Color="ThemeColor.Success" Size="ButtonSize.Small" Outline="true" OnClick="() => DownloadFile(file)">
                                 <i class="bi bi-download"></i>
                             </HxButton>
+                            <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" Outline="true"
+                                      OnClick="() => ShowReEncryptModal(file)" title="Re-encrypt">
+                                <i class="bi bi-shield-lock"></i>
+                            </HxButton>
+                            <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true"
+                                      OnClick="() => DecryptFile(file)" title="Decrypt (remove encryption)">
+                                <i class="bi bi-unlock"></i>
+                            </HxButton>
                             <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteFile(file)">
                                 <i class="bi bi-trash"></i>
                             </HxButton>
@@ -164,6 +173,29 @@ else
     </FooterTemplate>
 </HxModal>
 
+<HxModal @ref="_reEncryptModal" Title="Re-encrypt File">
+    <BodyTemplate>
+        @if (_reEncryptingFile is not null)
+        {
+            <p>Re-encrypt <strong>@_reEncryptingFile.FileName</strong> with a different encryption method.</p>
+            <p class="text-muted small">This streams the file through decrypt → re-encrypt without loading it fully into memory.</p>
+            <div class="mb-3">
+                <label class="form-label">Target Encryption</label>
+                <select class="form-select" @bind="_selectedEncryptionMethod">
+                    <option value="@EncryptionMethod.None">None (plaintext)</option>
+                    <option value="@EncryptionMethod.AesCtr256">AES-CTR-256</option>
+                    <option value="@EncryptionMethod.AesGcm256">AES-GCM-256</option>
+                    <option value="@EncryptionMethod.ChaCha20Poly1305">ChaCha20-Poly1305</option>
+                </select>
+            </div>
+        }
+    </BodyTemplate>
+    <FooterTemplate>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _reEncryptModal.HideAsync()">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Warning" OnClick="ReEncryptFile">Re-encrypt</HxButton>
+    </FooterTemplate>
+</HxModal>
+
 @code {
     [Parameter] public Guid DataSourceId { get; set; }
     [Parameter] public string? Path { get; set; }
@@ -176,6 +208,9 @@ else
     private int _uploadInputKey;
     private HxModal _newFolderModal = null!;
     private string _newFolderName = string.Empty;
+    private HxModal _reEncryptModal = null!;
+    private FileEntryDto? _reEncryptingFile;
+    private EncryptionMethod _selectedEncryptionMethod = EncryptionMethod.AesCtr256;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -321,5 +356,50 @@ else
             len /= 1024;
         }
         return $"{len:0.##} {sizes[order]}";
+    }
+
+    private async Task DecryptFile(FileEntryDto file)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Decrypt '{file.FileName}'? This will remove encryption and store the file as plaintext.");
+        if (!confirmed) return;
+
+        try
+        {
+            await Api.DecryptFileAsync(file.Id);
+            await LoadAsync();
+            Messenger.AddInformation($"'{file.FileName}' decrypted.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Decrypt failed: {ex.Message}");
+        }
+    }
+
+    private async Task ShowReEncryptModal(FileEntryDto file)
+    {
+        _reEncryptingFile = file;
+        _selectedEncryptionMethod = EncryptionMethod.AesCtr256;
+        await _reEncryptModal.ShowAsync();
+    }
+
+    private async Task ReEncryptFile()
+    {
+        if (_reEncryptingFile is null) return;
+        await _reEncryptModal.HideAsync();
+
+        try
+        {
+            await Api.ReEncryptFileAsync(_reEncryptingFile.Id, _selectedEncryptionMethod);
+            await LoadAsync();
+            Messenger.AddInformation($"'{_reEncryptingFile.FileName}' re-encrypted to {_selectedEncryptionMethod}.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Re-encrypt failed: {ex.Message}");
+        }
+        finally
+        {
+            _reEncryptingFile = null;
+        }
     }
 }

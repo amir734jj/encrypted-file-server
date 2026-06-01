@@ -54,8 +54,8 @@ public sealed class BrowseController(
         var (ds, masterKey, error) = await AuthorizeDataSource(dataSourceId);
         if (error is not null) return error;
 
-        var encryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
-        var isEncrypted = ds.Backend.EncryptionMethod != EncryptionMethod.None;
+        var defaultEncryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
+        var defaultMethod = ds.Backend.EncryptionMethod;
         path = NormalizePath(path);
 
         // If path ends with a GUID, try to serve it as a file download
@@ -68,19 +68,22 @@ public sealed class BrowseController(
             if (matchFiles.Count > 0)
             {
                 var file = matchFiles.First();
+                var fileMethod = file.EncryptionMethod ?? defaultMethod;
+                var isFileEncrypted = fileMethod != EncryptionMethod.None;
 
-                if (raw && isEncrypted)
+                if (raw && isFileEncrypted)
                 {
                     var rawStream = await fileStorage.OpenRawStreamAsync(file);
                     var rawFileName = System.IO.Path.GetFileName(file.StoragePath);
                     return File(rawStream, "application/octet-stream", rawFileName);
                 }
 
+                var fileEncryption = encryptionFactory.GetProvider(fileMethod);
                 var iv = Convert.FromBase64String(file.IvBase64);
-                var fullPath = encryption.DecryptString(file.OriginalFileName, masterKey!, iv);
+                var fullPath = fileEncryption.DecryptString(file.OriginalFileName, masterKey!, iv);
                 var fileName = System.IO.Path.GetFileName(fullPath);
                 var contentType = file.ContentType is not null
-                    ? encryption.DecryptString(file.ContentType, masterKey!, iv)
+                    ? fileEncryption.DecryptString(file.ContentType, masterKey!, iv)
                     : "application/octet-stream";
                 var stream = await fileStorage.OpenDecryptedStreamAsync(file);
                 return File(stream, contentType, fileName);
@@ -97,8 +100,9 @@ public sealed class BrowseController(
 
         foreach (var f in allFiles)
         {
+            var fileEncryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
             var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey!, iv);
+            var fullPath = fileEncryption.DecryptString(f.OriginalFileName, masterKey!, iv);
 
             if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -108,8 +112,9 @@ public sealed class BrowseController(
 
             if (slashIndex < 0)
             {
+                var isFileEncrypted = (f.EncryptionMethod ?? defaultMethod) != EncryptionMethod.None;
                 var href = $"/browse/{dataSourceId}/{path}{f.Id}";
-                var rawHref = isEncrypted ? $"{href}?raw=true" : null;
+                var rawHref = isFileEncrypted ? $"{href}?raw=true" : null;
                 entries.Add((relativePath, href, rawHref, f.OriginalFileSize, f.CreatedAt));
             }
             else

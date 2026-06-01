@@ -211,6 +211,7 @@ using (var scope = app.Services.CreateScope())
     var patches = new[]
     {
         "ALTER TABLE \"DataSources\" ADD COLUMN IF NOT EXISTS \"BackendProtocol\" varchar(20) NOT NULL DEFAULT 'FtpClient'",
+        "ALTER TABLE \"EncryptedFiles\" ADD COLUMN IF NOT EXISTS \"EncryptionMethod\" integer",
     };
     foreach (var sql in patches)
     {

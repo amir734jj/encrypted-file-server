@@ -1,6 +1,7 @@
 using Refit;
 using Shared.Contracts;
 using Shared.Contracts.Interfaces;
+using Shared.Models;
 
 namespace UI.Services;
 
@@ -95,6 +96,8 @@ public sealed class ApiService(
 
     public Task DeleteFileAsync(Guid id) => filesApi.DeleteAsync(id);
     public Task DeleteFolderAsync(Guid dataSourceId, string path) => filesApi.DeleteFolderAsync(dataSourceId, path);
+    public Task<FileEntryDto> DecryptFileAsync(Guid id) => filesApi.DecryptAsync(id);
+    public Task<FileEntryDto> ReEncryptFileAsync(Guid id, EncryptionMethod method) => filesApi.ReEncryptAsync(id, method);
 
     public Task<GlobalConfigModel> GetGlobalConfigAsync() => globalConfigApi.GetAsync();
     public Task SaveGlobalConfigAsync(GlobalConfigModel config) => globalConfigApi.SaveAsync(config);
