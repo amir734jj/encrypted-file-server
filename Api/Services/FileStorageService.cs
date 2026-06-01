@@ -66,6 +66,45 @@ public sealed class FileStorageService(
         return entity;
     }
 
+    public async Task<StreamingWriteHandle> OpenWriteStreamAsync(Guid userId, Guid dataSourceId, string fileName, string? contentType)
+    {
+        var dataSources = (await DataSourceDal.GetAll(
+            filterExprs: [d => d.Id == dataSourceId && d.UserId == userId],
+            project: d => d,
+            maxResults: 1)).ToList();
+        if (dataSources.Count == 0)
+            throw new UnauthorizedAccessException("Data source does not belong to the user.");
+
+        var ds = dataSources.First();
+        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var user = await userManager.FindByIdAsync(userId.ToString())
+            ?? throw new InvalidOperationException("User not found.");
+
+        var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
+        var fileId = Guid.NewGuid();
+        var connection = ds.ToBackendConnectionInfo();
+
+        var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, fileId);
+        var (cryptoStream, iv) = encryption.CreateEncryptingStream(destinationStream, masterKey);
+
+        return new StreamingWriteHandle(cryptoStream, destinationStream, async bytesWritten =>
+        {
+            var entity = await FileDal.Save(new EncryptedFile
+            {
+                Id = fileId,
+                UserId = userId,
+                DataSourceId = dataSourceId,
+                OriginalFileName = encryption.EncryptString(fileName, masterKey, iv),
+                StoragePath = storagePath,
+                ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
+                OriginalFileSize = bytesWritten,
+                IvBase64 = Convert.ToBase64String(iv),
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            return entity;
+        });
+    }
+
     public async Task<Stream> OpenDecryptedStreamAsync(EncryptedFile file, byte[] masterKey)
     {
         var dataSources = (await DataSourceDal.GetAll(

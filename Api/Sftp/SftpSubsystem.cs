@@ -48,7 +48,7 @@ public sealed class SftpSubsystem : IDisposable
     // Handle types
     private sealed record DirHandle(List<VfsEntry> Entries, bool Sent);
     private sealed record ReadHandle(EncryptedFile File, Stream Stream, long Position);
-    private sealed record WriteHandle(Guid DataSourceId, string Path, string? ContentType, MemoryStream Buffer);
+    private sealed record WriteHandle(StreamingWriteHandle Context, long Position);
     private sealed record VfsEntry(string Name, bool IsDir, long Size, DateTimeOffset Modified);
 
     // State
@@ -174,10 +174,10 @@ public sealed class SftpSubsystem : IDisposable
             case SSH_FXP_FSTAT: HandleFstat(requestId, r); break;
             case SSH_FXP_OPENDIR: await HandleOpendir(requestId, r); break;
             case SSH_FXP_READDIR: HandleReaddir(requestId, r); break;
-            case SSH_FXP_CLOSE: HandleClose(requestId, r); break;
+            case SSH_FXP_CLOSE: await HandleClose(requestId, r); break;
             case SSH_FXP_OPEN: await HandleOpen(requestId, r); break;
             case SSH_FXP_READ: await HandleRead(requestId, r); break;
-            case SSH_FXP_WRITE: HandleWrite(requestId, r); break;
+            case SSH_FXP_WRITE: await HandleWrite(requestId, r); break;
             case SSH_FXP_REMOVE: await HandleRemove(requestId, r); break;
             case SSH_FXP_MKDIR: SendStatus(requestId, SSH_FX_OK); break;
             case SSH_FXP_RMDIR: SendStatus(requestId, SSH_FX_OK); break;
@@ -362,8 +362,9 @@ public sealed class SftpSubsystem : IDisposable
                     await _fileStorage.DeleteFileAsync(existing);
             }
 
+            var ctx = await _fileStorage.OpenWriteStreamAsync(_userId!.Value, ds.Id, subPath, null);
             var handle = NextHandle();
-            _handles[handle] = new WriteHandle(ds.Id, subPath, null, new MemoryStream());
+            _handles[handle] = new WriteHandle(ctx, 0);
             Send(BuildHandlePacket(id, handle));
         }
         else
@@ -428,7 +429,7 @@ public sealed class SftpSubsystem : IDisposable
         }));
     }
 
-    private void HandleWrite(uint id, SftpReader r)
+    private async Task HandleWrite(uint id, SftpReader r)
     {
         var handle = r.ReadString();
         var offset = r.ReadUInt64();
@@ -440,12 +441,19 @@ public sealed class SftpSubsystem : IDisposable
             return;
         }
 
-        wh.Buffer.Position = (long)offset;
-        wh.Buffer.Write(data);
+        if ((long)offset != wh.Position)
+        {
+            _logger.LogWarning("SFTP non-sequential write at offset {Offset}, expected {Expected}", offset, wh.Position);
+            SendStatus(id, SSH_FX_FAILURE);
+            return;
+        }
+
+        await wh.Context.Stream.WriteAsync(data);
+        _handles[handle] = wh with { Position = wh.Position + data.Length };
         SendStatus(id, SSH_FX_OK);
     }
 
-    private void HandleClose(uint id, SftpReader r)
+    private async Task HandleClose(uint id, SftpReader r)
     {
         var handle = r.ReadString();
         if (!_handles.Remove(handle, out var h))
@@ -460,18 +468,14 @@ public sealed class SftpSubsystem : IDisposable
                 rh.Stream.Dispose();
                 break;
             case WriteHandle wh:
-                // Store the file
                 try
                 {
-                    wh.Buffer.Position = 0;
-                    _fileStorage.StoreFileAsync(_userId!.Value, wh.DataSourceId, wh.Path,
-                        wh.ContentType, wh.Buffer).GetAwaiter().GetResult();
-                    wh.Buffer.Dispose();
+                    await wh.Context.CompleteAsync(wh.Position);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to store file via SFTP: {Path}", wh.Path);
-                    wh.Buffer.Dispose();
+                    _logger.LogError(ex, "Failed to store file via SFTP");
+                    await wh.Context.DisposeAsync();
                     SendStatus(id, SSH_FX_FAILURE);
                     return;
                 }
@@ -751,7 +755,7 @@ public sealed class SftpSubsystem : IDisposable
         foreach (var h in _handles.Values)
         {
             if (h is ReadHandle rh) rh.Stream.Dispose();
-            if (h is WriteHandle wh) wh.Buffer.Dispose();
+            if (h is WriteHandle wh) wh.Context.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
         _handles.Clear();
 
