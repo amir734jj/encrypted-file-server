@@ -59,6 +59,7 @@ else
                 <li>Create an <a href="/tickets">Access Ticket</a> for FTP/SFTP/HTTP Basic auth (random username + password)</li>
                 <li>FTP: <code>ftp://@(_host):@(_config?.FtpPort ?? 2121)</code> &nbsp;|&nbsp; SFTP: <code>sftp://@(_host):@(_config?.SftpPort ?? 2222)</code></li>
                 <li>HTTP browse: <code>@(Nav.BaseUri)browse</code> (uses ticket credentials via Basic auth)</li>
+                <li>Raw view: <code>@(Nav.BaseUri)raw</code> (view raw stored files without decryption)</li>
                 <li>Files are encrypted at rest with your chosen algorithm (AES-CTR-256 default, AES-GCM-256, ChaCha20)</li>
                 <li>Downloads are <strong>streamed and decrypted on-the-fly</strong> — no temp files on disk</li>
             </ol>
