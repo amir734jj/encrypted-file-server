@@ -10,6 +10,7 @@ public sealed class EncryptionProviderFactory : IEncryptionProviderFactory
 
     private static readonly Dictionary<EncryptionMethod, string> MethodToKey = new()
     {
+        [EncryptionMethod.None] = "none",
         [EncryptionMethod.AesCtr256] = "aes-ctr-256",
         [EncryptionMethod.AesGcm256] = "aes-gcm-256",
         [EncryptionMethod.ChaCha20Poly1305] = "chacha20-poly1305",
