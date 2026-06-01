@@ -8,7 +8,7 @@ namespace Api.Services.Backend;
 /// Stores encrypted file blobs on a remote FTP server via FluentFTP.
 /// Each call receives per-datasource connection info.
 /// </summary>
-public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider> logger) : IBackendStorageProvider
+public sealed class FtpBackendStorageProvider() : IBackendStorageProvider
 {
     public string ProviderKey => "ftp-client";
     public BackendStorageType StorageType => BackendStorageType.FtpClient;

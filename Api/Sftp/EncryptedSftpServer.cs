@@ -49,7 +49,13 @@ public sealed class EncryptedSftpServer : IDisposable
         _logger.LogInformation("SFTP server stopped");
     }
 
-    public void Dispose() => _server.Stop();
+    public void Dispose()
+    {
+        _server.Stop();
+        foreach (var sub in _activeSubsystems.Values)
+            sub.Dispose();
+        _activeSubsystems.Clear();
+    }
 
     private void OnConnectionAccepted(object? sender, Session session)
     {

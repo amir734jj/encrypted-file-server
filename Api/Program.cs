@@ -296,6 +296,10 @@ static X509Certificate2 LoadOrGenerateFtpCertificate()
     using var rsa = RSA.Create(2048);
     var req = new CertificateRequest("CN=EncryptedFileServer", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
     req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
+    var san = new SubjectAlternativeNameBuilder();
+    san.AddDnsName("localhost");
+    san.AddDnsName("fs.coolify.hesamian.com");
+    req.CertificateExtensions.Add(san.Build());
     var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(10));
     File.WriteAllBytes(pfxPath, cert.Export(X509ContentType.Pfx));
     return X509CertificateLoader.LoadPkcs12FromFile(pfxPath, null);

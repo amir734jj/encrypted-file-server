@@ -82,7 +82,7 @@ public sealed class SftpSubsystem : IDisposable
     private int _bufferLen;
     private byte[] _buffer = new byte[4096];
     private Task? _processTask;
-    private bool _disposed;
+    private int _disposed;
 
     public SftpSubsystem(SessionChannel channel, IServiceScope scope, Guid? userId, ILogger logger, Action? onDisposed = null)
     {
@@ -840,8 +840,7 @@ public sealed class SftpSubsystem : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
         _cts.Cancel();
         _inbound.Writer.TryComplete();
