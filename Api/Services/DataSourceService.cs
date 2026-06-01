@@ -105,11 +105,9 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
 
             ds.Backend.BasePath = req.Backend.BasePath;
             ds.Backend.UseSsl = req.Backend.UseSsl;
-            ds.Backend.EncryptionMethod = req.Backend.EncryptionMethod;
-            if (!string.IsNullOrEmpty(req.Backend.MasterPassword))
-            {
-                ds.Backend.MasterPassword = req.Backend.MasterPassword;
-            }
+            // EncryptionMethod and MasterPassword are NOT updated here —
+            // changing them without re-encrypting files would corrupt data.
+            // Use the re-encrypt endpoint instead.
 
             // Sync frontends: add new, update existing, remove absent
             var requestedTypes = req.Frontends.Select(f => f.Type).ToHashSet();

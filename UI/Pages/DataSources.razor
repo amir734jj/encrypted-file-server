@@ -136,6 +136,12 @@ else
         </div>
         <div class="mb-3">
             <label class="form-label">Encryption Method</label>
+            @if (_editId.HasValue)
+            {
+                <div class="text-muted small"><i class="bi bi-lock me-1"></i>@_encryptionMethod — use Re-encrypt to change.</div>
+            }
+            else
+            {
             @foreach (var method in Enum.GetValues<EncryptionMethod>())
             {
                 <div class="form-check mb-2">
@@ -147,6 +153,7 @@ else
                         <div class="text-muted small">@GetEncryptionDescription(method)</div>
                     </label>
                 </div>
+            }
             }
         </div>
 
@@ -190,13 +197,17 @@ else
                 <small class="text-muted">Upgrades the FTP connection to use TLS encryption.</small>
             </div>
         }
-        @if (_encryptionMethod != EncryptionMethod.None)
+        @if (_encryptionMethod != EncryptionMethod.None && !_editId.HasValue)
         {
             <div class="mb-3">
                 <HxInputText Label="Master Password" @bind-Value="_masterPassword" Type="InputType.Password"
-                             Placeholder="@(_editId.HasValue ? "(unchanged)" : "")"
-                             Hint="@(_editId.HasValue ? "Leave blank to keep current password." : "Encryption key for files. Use the same password to re-attach to existing backends.")" />
+                             Placeholder=""
+                             Hint="Encryption key for files. Use the same password to re-attach to existing backends." />
             </div>
+        }
+        @if (_encryptionMethod != EncryptionMethod.None && _editId.HasValue)
+        {
+            <div class="mb-3 text-muted small"><i class="bi bi-lock me-1"></i>Master password cannot be changed after creation.</div>
         }
 
         <h6 class="text-muted mb-2 mt-4">Frontend Access</h6>
