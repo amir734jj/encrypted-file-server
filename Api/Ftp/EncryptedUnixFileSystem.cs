@@ -220,9 +220,6 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             {
                 return new VirtualDirectoryEntry(name, dsId, candidatePath);
             }
-
-            // Allow CWD into any path for uploading, but don't track it as a session dir
-            return new VirtualDirectoryEntry(name, dsId, candidatePath);
         }
 
         return null;
