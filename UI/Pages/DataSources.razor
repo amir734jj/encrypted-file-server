@@ -70,23 +70,32 @@ else
                         <br />
                         <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
                     </div>
-                    <div class="card-footer d-flex gap-2 flex-wrap">
-                        <HxButton Color="ThemeColor.Primary" Size="ButtonSize.Small" OnClick="() => BrowseDataSource(ds.Id)">
+                    <div class="card-footer d-flex gap-2 flex-wrap align-items-center">
+                        @if (_busyIds.Contains(ds.Id))
+                        {
+                            <div class="spinner-border spinner-border-sm text-info me-2" role="status"></div>
+                            <span class="text-info small me-auto">Operation in progress…</span>
+                        }
+                        <HxButton Color="ThemeColor.Primary" Size="ButtonSize.Small" OnClick="() => BrowseDataSource(ds.Id)"
+                                  Enabled="@(!_busyIds.Contains(ds.Id))">
                             <i class="bi bi-folder2-open me-1"></i> Browse
                         </HxButton>
-                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="() => ShowEditModal(ds)">
+                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="() => ShowEditModal(ds)"
+                                  Enabled="@(!_busyIds.Contains(ds.Id))">
                             <i class="bi bi-pencil me-1"></i> Edit
                         </HxButton>
                         <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true"
                                   OnClick="() => DecryptDataSource(ds)" title="Decrypt all files"
-                                  Enabled="@(ds.Backend.EncryptionMethod != EncryptionMethod.None)">
+                                  Enabled="@(ds.Backend.EncryptionMethod != EncryptionMethod.None && !_busyIds.Contains(ds.Id))">
                             <i class="bi bi-unlock me-1"></i> Decrypt All
                         </HxButton>
                         <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" Outline="true"
-                                  OnClick="() => ShowReEncryptDsModal(ds)" title="Re-encrypt all files">
+                                  OnClick="() => ShowReEncryptDsModal(ds)" title="Re-encrypt all files"
+                                  Enabled="@(!_busyIds.Contains(ds.Id))">
                             <i class="bi bi-shield-lock me-1"></i> Re-encrypt All
                         </HxButton>
-                        <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)">
+                        <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)"
+                                  Enabled="@(!_busyIds.Contains(ds.Id))">
                             <i class="bi bi-trash me-1"></i> Delete
                         </HxButton>
                     </div>
@@ -236,6 +245,7 @@ else
     private DataSourceDto? _reEncryptingDs;
     private EncryptionMethod _dsReEncryptMethod = EncryptionMethod.AesCtr256;
     private Guid? _editId;
+    private readonly HashSet<Guid> _busyIds = [];
 
     // Form fields
     private string _name = string.Empty;
@@ -421,6 +431,8 @@ else
             return;
         }
 
+        _busyIds.Add(ds.Id);
+        StateHasChanged();
         try
         {
             var result = await Api.DecryptDataSourceAsync(ds.Id);
@@ -434,6 +446,10 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Bulk decrypt failed: {ex.Message}");
+        }
+        finally
+        {
+            _busyIds.Remove(ds.Id);
         }
     }
 
@@ -451,11 +467,14 @@ else
             return;
         }
 
+        var dsId = _reEncryptingDs.Id;
         await _reEncryptDsModal.HideAsync();
 
+        _busyIds.Add(dsId);
+        StateHasChanged();
         try
         {
-            var result = await Api.ReEncryptDataSourceAsync(_reEncryptingDs.Id, _dsReEncryptMethod);
+            var result = await Api.ReEncryptDataSourceAsync(dsId, _dsReEncryptMethod);
             Messenger.AddInformation($"Re-encrypted {result.Processed}/{result.TotalFiles} file(s) to {_dsReEncryptMethod}.");
             await LoadAsync();
         }
@@ -466,6 +485,10 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Bulk re-encrypt failed: {ex.Message}");
+        }
+        finally
+        {
+            _busyIds.Remove(dsId);
         }
     }
 
