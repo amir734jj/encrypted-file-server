@@ -29,6 +29,15 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         return result;
     }
 
+    public async Task<string?> GetMasterPasswordAsync(Guid id, Guid userId)
+    {
+        var ds = (await Dal.GetAll(
+            filterExprs: [d => d.Id == id && d.UserId == userId],
+            project: d => d,
+            maxResults: 1)).FirstOrDefault();
+        return ds?.Backend.MasterPassword;
+    }
+
     public async Task<DataSourceDto?> GetByIdAsync(Guid id, Guid userId)
     {
         var dataSources = (await Dal.GetAll(

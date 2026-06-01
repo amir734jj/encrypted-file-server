@@ -26,4 +26,7 @@ public interface IDataSourcesApi
 
     [Get("/api/datasources/{id}/progress")]
     Task<BulkOperationProgress?> GetProgressAsync(Guid id);
+
+    [Get("/api/datasources/{id}/master-password")]
+    Task<MasterPasswordResponse> GetMasterPasswordAsync(Guid id);
 }
