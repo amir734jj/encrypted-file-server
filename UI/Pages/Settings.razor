@@ -21,13 +21,16 @@ else if (_config is not null)
                     <div class="card-header"><i class="bi bi-hdd-network me-2"></i>FTP Server</div>
                     <div class="card-body">
                         <div class="mb-3">
-                            <HxInputNumber @bind-Value="_config.FtpPort" Label="FTP Port" />
+                            <HxInputNumber @bind-Value="_config.FtpPort" Label="FTP Port"
+                                           Hint="The port the built-in FTP server listens on." />
                         </div>
                         <div class="mb-3">
-                            <HxInputNumber @bind-Value="_config.FtpPassivePortMin" Label="Passive Port Min" />
+                            <HxInputNumber @bind-Value="_config.FtpPassivePortMin" Label="Passive Port Min"
+                                           Hint="Start of the port range for FTP passive (PASV) data connections." />
                         </div>
                         <div class="mb-3">
-                            <HxInputNumber @bind-Value="_config.FtpPassivePortMax" Label="Passive Port Max" />
+                            <HxInputNumber @bind-Value="_config.FtpPassivePortMax" Label="Passive Port Max"
+                                           Hint="End of the port range. Must be open in your firewall/Docker." />
                         </div>
                     </div>
                 </div>
