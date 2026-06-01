@@ -54,6 +54,17 @@ else
                             <span class="badge @badgeClass me-1 mt-1">@fe.Type @(fe.AllowAnonymous ? "(anon)" : "")</span>
                         }
                         <span class="badge bg-secondary me-1 mt-1">@ds.Backend.EncryptionMethod</span>
+                        @{
+                            var httpFe = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
+                        }
+                        @if (httpFe is { AllowAnonymous: true })
+                        {
+                            <br />
+                            <small class="text-muted">
+                                <i class="bi bi-link-45deg me-1"></i>
+                                <a href="@($"browse/{ds.Id}/")" target="_blank">@($"{Nav.BaseUri}browse/{ds.Id}/")</a>
+                            </small>
+                        }
                         <br />
                         <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
                     </div>
