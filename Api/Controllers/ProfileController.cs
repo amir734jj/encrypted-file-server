@@ -18,7 +18,10 @@ public sealed class ProfileController(UserManager<User> users) : ControllerBase
     public async Task<IActionResult> Update([FromBody] UpdateProfileRequest req)
     {
         var user = await users.FindByIdAsync(CurrentUserId.ToString());
-        if (user is null) return NotFound();
+        if (user is null)
+        {
+            return NotFound();
+        }
 
         user.DisplayName = req.DisplayName?.Trim();
         await users.UpdateAsync(user);
@@ -34,7 +37,10 @@ public sealed class ProfileController(UserManager<User> users) : ControllerBase
         }
 
         var user = await users.FindByIdAsync(CurrentUserId.ToString());
-        if (user is null) return NotFound();
+        if (user is null)
+        {
+            return NotFound();
+        }
 
         var result = await users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
         if (!result.Succeeded)

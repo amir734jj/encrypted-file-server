@@ -3,11 +3,6 @@ using Shared.Interfaces;
 
 namespace Api.Services.Backend;
 
-public interface IBackendStorageProviderFactory
-{
-    IBackendStorageProvider GetProvider(BackendStorageType type);
-}
-
 public sealed class BackendStorageProviderFactory(IEnumerable<IBackendStorageProvider> providers) : IBackendStorageProviderFactory
 {
     private readonly Dictionary<BackendStorageType, IBackendStorageProvider> _providers =

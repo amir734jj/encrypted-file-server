@@ -83,7 +83,11 @@ else if (_config is not null)
 
     private async Task SaveAsync()
     {
-        if (_config is null) return;
+        if (_config is null)
+        {
+            return;
+        }
+
         _saving = true;
 
         try

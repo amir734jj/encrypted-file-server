@@ -31,7 +31,9 @@ public sealed class TicketsController(IEfRepository repository) : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateAccessTicketRequest req)
     {
         if (req.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
             return BadRequest("Expiration must be in the future.");
+        }
 
         var username = GenerateRandomString(12);
         var password = GenerateRandomString(24);
@@ -54,7 +56,9 @@ public sealed class TicketsController(IEfRepository repository) : ControllerBase
             filterExprs: [t => t.Id == id && t.UserId == CurrentUserId]);
 
         if (!exists)
+        {
             return NotFound();
+        }
 
         await TicketDal.Delete(id);
         return NoContent();
@@ -64,7 +68,9 @@ public sealed class TicketsController(IEfRepository repository) : ControllerBase
     public async Task<IActionResult> Extend(Guid id, [FromBody] ExtendAccessTicketRequest req)
     {
         if (req.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
             return BadRequest("Expiration must be in the future.");
+        }
 
         var tickets = (await TicketDal.GetAll(
             filterExprs: [t => t.Id == id && t.UserId == CurrentUserId],
@@ -72,7 +78,9 @@ public sealed class TicketsController(IEfRepository repository) : ControllerBase
             maxResults: 1)).ToList();
 
         if (tickets.Count == 0)
+        {
             return NotFound();
+        }
 
         await TicketDal.Update(id, t => t.ExpiresAt = req.ExpiresAt);
 

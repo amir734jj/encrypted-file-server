@@ -22,7 +22,9 @@ public sealed class TicketCleanupService(IServiceScopeFactory scopeFactory, ILog
                     .ExecuteDeleteAsync(stoppingToken);
 
                 if (deleted > 0)
+                {
                     logger.LogInformation("Cleaned up {Count} expired access ticket(s)", deleted);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

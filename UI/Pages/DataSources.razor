@@ -256,7 +256,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        if (!Auth.IsAuthenticated) return;
+        if (!Auth.IsAuthenticated)
+        {
+            return;
+        }
+
         await LoadAsync();
     }
 
@@ -328,13 +332,20 @@ else
     {
         // Auto-switch default port when toggling protocol
         if (_backendProtocol == BackendStorageType.FtpClient && _backendPort == 21)
+        {
             _backendPort = 22;
+        }
         else if (_backendProtocol == BackendStorageType.SftpClient && _backendPort == 22)
+        {
             _backendPort = 21;
+        }
+
         _backendProtocol = protocol;
         // SSL/TLS only applies to FTP (FTPS); SFTP is always encrypted via SSH
         if (protocol == BackendStorageType.SftpClient)
+        {
             _backendSsl = false;
+        }
     }
 
     private async Task SaveDataSource()
@@ -343,9 +354,20 @@ else
         {
             var backend = new BackendRequest(_backendProtocol, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath.TrimStart('/'), _backendSsl, _encryptionMethod, _masterPassword);
             var frontends = new List<FrontendRequest>();
-            if (_ftpEnabled) frontends.Add(new FrontendRequest(FrontendType.Ftp, _ftpAnon));
-            if (_httpEnabled) frontends.Add(new FrontendRequest(FrontendType.Http, _httpAnon));
-            if (_sftpEnabled) frontends.Add(new FrontendRequest(FrontendType.Sftp, _sftpAnon));
+            if (_ftpEnabled)
+            {
+                frontends.Add(new FrontendRequest(FrontendType.Ftp, _ftpAnon));
+            }
+
+            if (_httpEnabled)
+            {
+                frontends.Add(new FrontendRequest(FrontendType.Http, _httpAnon));
+            }
+
+            if (_sftpEnabled)
+            {
+                frontends.Add(new FrontendRequest(FrontendType.Sftp, _sftpAnon));
+            }
 
             if (_editId.HasValue)
             {
@@ -373,7 +395,10 @@ else
     private async Task DeleteDataSource(DataSourceDto ds)
     {
         var confirmed = await MessageBox.ConfirmAsync($"Delete '{ds.Name}' and all its files?");
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            return;
+        }
 
         try
         {
@@ -390,7 +415,10 @@ else
     private async Task DecryptDataSource(DataSourceDto ds)
     {
         var confirmed = await MessageBox.ConfirmAsync($"Decrypt all {ds.FileCount} file(s) in '{ds.Name}'? This removes encryption from every file.");
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            return;
+        }
 
         try
         {
@@ -412,7 +440,11 @@ else
 
     private async Task ReEncryptDataSource()
     {
-        if (_reEncryptingDs is null) return;
+        if (_reEncryptingDs is null)
+        {
+            return;
+        }
+
         await _reEncryptDsModal.HideAsync();
 
         try

@@ -20,7 +20,9 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
             var hasAnonymous = await repository.For<DataSource>().Any(
                 filterExprs: [d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous)]);
             if (!hasAnonymous)
+            {
                 return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
+            }
 
             var anonIdentity = new ClaimsIdentity(
                 [new Claim("ftp:anonymous", "true"), new Claim(ClaimTypes.Name, "anonymous")],
@@ -35,14 +37,18 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
             maxResults: 1)).ToList();
 
         if (tickets.Count == 0)
+        {
             return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
+        }
 
         var ticket = tickets.First();
 
         // Reject if the ticket owner's account is disabled
         var ticketOwner = await userManager.FindByIdAsync(ticket.UserId.ToString());
         if (ticketOwner is null || !ticketOwner.IsActive)
+        {
             return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
+        }
 
         var claims = new[]
         {
@@ -53,13 +59,4 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
         return new MemberValidationResult(MemberValidationStatus.AuthenticatedUser,
             new ClaimsPrincipal(identity));
     }
-}
-
-public static class FtpClaimsPrincipalExtensions
-{
-    public static Guid GetUserId(this ClaimsPrincipal principal)
-        => Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
-
-    public static bool IsAnonymous(this ClaimsPrincipal principal)
-        => principal.FindFirstValue("ftp:anonymous") == "true";
 }

@@ -76,9 +76,13 @@ public sealed class EncryptedSftpServer : IDisposable
                     e.Result = accepted;
 
                     if (accepted)
+                    {
                         _logger.LogInformation("SFTP auth success: {User} (anonymous={Anon})", e.Username, isAnonymous);
+                    }
                     else
+                    {
                         _logger.LogWarning("SFTP auth failed: {User}", e.Username);
+                    }
                 };
             }
             else if (service is ConnectionService conn)
@@ -121,7 +125,9 @@ public sealed class EncryptedSftpServer : IDisposable
             .GetAwaiter().GetResult().ToList();
 
         if (tickets.Count == 0)
+        {
             return (false, null);
+        }
 
         var ticket = tickets.First();
 
@@ -129,7 +135,9 @@ public sealed class EncryptedSftpServer : IDisposable
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
         var ticketOwner = userManager.FindByIdAsync(ticket.UserId.ToString()).GetAwaiter().GetResult();
         if (ticketOwner is null || !ticketOwner.IsActive)
+        {
             return (false, null);
+        }
 
         return (true, ticket.UserId);
     }
@@ -141,7 +149,9 @@ public sealed class EncryptedSftpServer : IDisposable
         var keyPath = Path.Combine(keyDir, "sftp_host_key.pem");
 
         if (File.Exists(keyPath))
+        {
             return File.ReadAllText(keyPath);
+        }
 
         var pem = KeyGenerator.GenerateRsaKeyPem(4096);
         File.WriteAllText(keyPath, pem);

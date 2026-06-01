@@ -21,7 +21,9 @@ public sealed class FtpBackendStorageProvider() : IBackendStorageProvider
 
         var dir = Path.GetDirectoryName(storagePath)?.Replace('\\', '/');
         if (!string.IsNullOrEmpty(dir) && !await client.DirectoryExists(dir, ct))
+        {
             await client.CreateDirectory(dir, ct);
+        }
 
         var stream = await client.OpenWrite(storagePath, token: ct);
         return (new FtpWriteStream(stream, client), storagePath);
@@ -40,7 +42,9 @@ public sealed class FtpBackendStorageProvider() : IBackendStorageProvider
     {
         using var client = await ConnectAsync(connection, ct);
         if (!await client.FileExists(storagePath, ct))
+        {
             return false;
+        }
 
         await client.DeleteFile(storagePath, ct);
         return true;
@@ -61,7 +65,9 @@ public sealed class FtpBackendStorageProvider() : IBackendStorageProvider
 
         var dir = Path.GetDirectoryName(newStoragePath)?.Replace('\\', '/');
         if (!string.IsNullOrEmpty(dir) && !await client.DirectoryExists(dir, ct))
+        {
             await client.CreateDirectory(dir, ct);
+        }
 
         await client.Rename(oldStoragePath, newStoragePath, ct);
         return newStoragePath;

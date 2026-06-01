@@ -35,7 +35,10 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             filterExprs: [d => d.Id == id && d.UserId == userId],
             project: d => d,
             maxResults: 1)).ToList();
-        if (dataSources.Count == 0) return null;
+        if (dataSources.Count == 0)
+        {
+            return null;
+        }
 
         var d = dataSources.First();
         var files = (await FileDal.GetAll(
@@ -75,7 +78,9 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
     public async Task<bool> UpdateAsync(Guid id, Guid userId, UpdateDataSourceRequest req)
     {
         if (!await Dal.Any(filterExprs: [d => d.Id == id && d.UserId == userId]))
+        {
             return false;
+        }
 
         await Dal.Update(id, ds =>
         {
@@ -85,12 +90,17 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             ds.Backend.Port = req.Backend.Port;
             ds.Backend.Username = req.Backend.Username;
             if (!string.IsNullOrEmpty(req.Backend.Password))
+            {
                 ds.Backend.Password = req.Backend.Password;
+            }
+
             ds.Backend.BasePath = req.Backend.BasePath;
             ds.Backend.UseSsl = req.Backend.UseSsl;
             ds.Backend.EncryptionMethod = req.Backend.EncryptionMethod;
             if (!string.IsNullOrEmpty(req.Backend.MasterPassword))
+            {
                 ds.Backend.MasterPassword = req.Backend.MasterPassword;
+            }
 
             // Sync frontends: add new, update existing, remove absent
             var requestedTypes = req.Frontends.Select(f => f.Type).ToHashSet();
@@ -122,7 +132,9 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
     public async Task<bool> DeleteAsync(Guid id, Guid userId)
     {
         if (!await Dal.Any(filterExprs: [d => d.Id == id && d.UserId == userId]))
+        {
             return false;
+        }
 
         var files = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == id],

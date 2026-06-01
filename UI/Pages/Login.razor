@@ -44,7 +44,9 @@
     protected override void OnInitialized()
     {
         if (Auth.IsAuthenticated)
+        {
             Nav.NavigateTo("/");
+        }
     }
 
     private async Task HandleLogin()

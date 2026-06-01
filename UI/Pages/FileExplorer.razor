@@ -179,7 +179,11 @@ else
     private string _newFolderName = string.Empty;
     protected override async Task OnParametersSetAsync()
     {
-        if (!Auth.IsAuthenticated) return;
+        if (!Auth.IsAuthenticated)
+        {
+            return;
+        }
+
         _listing = null; // Show loading spinner while fetching
         StateHasChanged();
         await LoadAsync();
@@ -275,7 +279,10 @@ else
     private async Task DeleteFile(FileEntryDto file)
     {
         var confirmed = await MessageBox.ConfirmAsync($"Delete '{file.FileName}'?");
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            return;
+        }
 
         try
         {
@@ -293,7 +300,10 @@ else
     {
         var confirmed = await MessageBox.ConfirmAsync(
             $"Delete folder '{folder.Name}' and all {folder.FileCount} file(s) inside?");
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            return;
+        }
 
         try
         {

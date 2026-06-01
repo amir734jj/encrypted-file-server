@@ -95,7 +95,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
 
         private void EncryptAndWriteChunk()
         {
-            if (_bufferPos == 0) return;
+            if (_bufferPos == 0)
+            {
+                return;
+            }
 
             DeriveChunkNonce();
             _chacha.Encrypt(
@@ -115,7 +118,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
 
         private async ValueTask EncryptAndWriteChunkAsync(CancellationToken ct)
         {
-            if (_bufferPos == 0) return;
+            if (_bufferPos == 0)
+            {
+                return;
+            }
 
             DeriveChunkNonce();
             _chacha.Encrypt(
@@ -142,7 +148,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
                 Buffer.BlockCopy(buffer, offset + pos, _plaintextBuf, _bufferPos, toCopy);
                 _bufferPos += toCopy;
                 pos += toCopy;
-                if (_bufferPos >= ChunkSize) EncryptAndWriteChunk();
+                if (_bufferPos >= ChunkSize)
+                {
+                    EncryptAndWriteChunk();
+                }
             }
         }
 
@@ -155,7 +164,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
                 Buffer.BlockCopy(buffer, offset + pos, _plaintextBuf, _bufferPos, toCopy);
                 _bufferPos += toCopy;
                 pos += toCopy;
-                if (_bufferPos >= ChunkSize) await EncryptAndWriteChunkAsync(ct);
+                if (_bufferPos >= ChunkSize)
+                {
+                    await EncryptAndWriteChunkAsync(ct);
+                }
             }
         }
 
@@ -168,7 +180,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
                 buffer.Span.Slice(pos, toCopy).CopyTo(_plaintextBuf.AsSpan(_bufferPos));
                 _bufferPos += toCopy;
                 pos += toCopy;
-                if (_bufferPos >= ChunkSize) await EncryptAndWriteChunkAsync(ct);
+                if (_bufferPos >= ChunkSize)
+                {
+                    await EncryptAndWriteChunkAsync(ct);
+                }
             }
         }
 
@@ -255,7 +270,9 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             var plainLen = BinaryPrimitives.ReadInt32LittleEndian(_headerBuf);
 
             if (plainLen <= 0 || plainLen > ChunkSize)
+            {
                 throw new InvalidDataException($"Invalid chunk length {plainLen}; max allowed is {ChunkSize}.");
+            }
 
             if (ReadExact(_inner, _tagBuf, TagSize) < TagSize) { _eof = true; return false; }
             if (ReadExact(_inner, _ciphertextBuf, plainLen) < plainLen) { _eof = true; return false; }
@@ -278,7 +295,9 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             var plainLen = BinaryPrimitives.ReadInt32LittleEndian(_headerBuf);
 
             if (plainLen <= 0 || plainLen > ChunkSize)
+            {
                 throw new InvalidDataException($"Invalid chunk length {plainLen}; max allowed is {ChunkSize}.");
+            }
 
             if (await ReadExactAsync(_inner, _tagBuf, TagSize, ct) < TagSize) { _eof = true; return false; }
             if (await ReadExactAsync(_inner, _ciphertextBuf, plainLen, ct) < plainLen) { _eof = true; return false; }
@@ -301,7 +320,11 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             while (totalRead < count)
             {
                 var read = s.Read(buffer, totalRead, count - totalRead);
-                if (read == 0) return totalRead;
+                if (read == 0)
+                {
+                    return totalRead;
+                }
+
                 totalRead += read;
             }
             return totalRead;
@@ -313,7 +336,11 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             while (totalRead < count)
             {
                 var read = await s.ReadAsync(buffer.AsMemory(totalRead, count - totalRead), ct);
-                if (read == 0) return totalRead;
+                if (read == 0)
+                {
+                    return totalRead;
+                }
+
                 totalRead += read;
             }
             return totalRead;
@@ -326,7 +353,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             {
                 if (_chunkPos >= _chunkLen)
                 {
-                    if (_eof || !ReadNextChunk()) break;
+                    if (_eof || !ReadNextChunk())
+                    {
+                        break;
+                    }
                 }
 
                 var available = _chunkLen - _chunkPos;
@@ -345,7 +375,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             {
                 if (_chunkPos >= _chunkLen)
                 {
-                    if (_eof || !await ReadNextChunkAsync(ct)) break;
+                    if (_eof || !await ReadNextChunkAsync(ct))
+                    {
+                        break;
+                    }
                 }
 
                 var available = _chunkLen - _chunkPos;
@@ -364,7 +397,10 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             {
                 if (_chunkPos >= _chunkLen)
                 {
-                    if (_eof || !await ReadNextChunkAsync(ct)) break;
+                    if (_eof || !await ReadNextChunkAsync(ct))
+                    {
+                        break;
+                    }
                 }
 
                 var available = _chunkLen - _chunkPos;

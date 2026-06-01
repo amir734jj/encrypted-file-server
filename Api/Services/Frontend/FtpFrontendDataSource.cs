@@ -27,6 +27,8 @@ public sealed class FtpFrontendDataSource(IFtpServerHost ftpHost) : IFrontendDat
     public async ValueTask DisposeAsync()
     {
         if (IsRunning)
+        {
             await StopAsync();
+        }
     }
 }

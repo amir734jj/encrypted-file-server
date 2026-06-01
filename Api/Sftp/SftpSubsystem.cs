@@ -163,16 +163,27 @@ public sealed class SftpSubsystem : IDisposable
     {
         type = 0;
         payload = [];
-        if (_bufferLen < 5) return false;
+        if (_bufferLen < 5)
+        {
+            return false;
+        }
+
         var length = (int)BinaryPrimitives.ReadUInt32BigEndian(_buffer);
-        if (_bufferLen < 4 + length) return false;
+        if (_bufferLen < 4 + length)
+        {
+            return false;
+        }
+
         type = _buffer[4];
         payload = _buffer[5..(4 + length)];
         // Shift remaining data
         var consumed = 4 + length;
         _bufferLen -= consumed;
         if (_bufferLen > 0)
+        {
             Buffer.BlockCopy(_buffer, consumed, _buffer, 0, _bufferLen);
+        }
+
         return true;
     }
 
@@ -349,8 +360,14 @@ public sealed class SftpSubsystem : IDisposable
             {
                 w.WriteString(e.Name);
                 w.WriteString(FormatLongName(e));
-                if (e.IsDir) w.WriteAttrs(DirAttrs(e.Modified));
-                else w.WriteAttrs(FileAttrs(e.Size, e.Modified));
+                if (e.IsDir)
+                {
+                    w.WriteAttrs(DirAttrs(e.Modified));
+                }
+                else
+                {
+                    w.WriteAttrs(FileAttrs(e.Size, e.Modified));
+                }
             }
         }));
     }
@@ -386,7 +403,9 @@ public sealed class SftpSubsystem : IDisposable
             {
                 var existing = await FindFileAsync(ds, subPath);
                 if (existing is not null)
+                {
                     await _fileStorage.DeleteFileAsync(existing);
+                }
             }
 
             var ctx = await _fileStorage.OpenWriteStreamAsync(_userId!.Value, ds.Id, subPath, null);
@@ -427,7 +446,11 @@ public sealed class SftpSubsystem : IDisposable
             while (toSkip > 0)
             {
                 var read = await rh.Stream.ReadAsync(skipBuf.AsMemory(0, (int)Math.Min(skipBuf.Length, toSkip)));
-                if (read == 0) break;
+                if (read == 0)
+                {
+                    break;
+                }
+
                 toSkip -= read;
             }
         }
@@ -597,7 +620,9 @@ public sealed class SftpSubsystem : IDisposable
     private async Task<List<DataSource>> GetDataSourcesAsync()
     {
         if (_cachedDataSources is not null)
+        {
             return _cachedDataSources;
+        }
 
         if (_userId.HasValue)
         {
@@ -626,7 +651,10 @@ public sealed class SftpSubsystem : IDisposable
     private byte[] GetCachedMasterKey(DataSource ds)
     {
         if (_masterKeyCache.TryGetValue(ds.Id, out var cached))
+        {
             return cached;
+        }
+
         var key = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         _masterKeyCache[ds.Id] = key;
         return key;
@@ -652,7 +680,9 @@ public sealed class SftpSubsystem : IDisposable
 
             if (!string.IsNullOrEmpty(pathPrefix) &&
                 !fullPath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
+            {
                 continue;
+            }
 
             var relativePath = string.IsNullOrEmpty(pathPrefix) ? fullPath : fullPath[pathPrefix.Length..];
             var slashIdx = relativePath.IndexOf('/');
@@ -665,7 +695,9 @@ public sealed class SftpSubsystem : IDisposable
             {
                 var folderName = relativePath[..slashIdx];
                 if (seenFolders.Add(folderName))
+                {
                     entries.Add(new VfsEntry(folderName, true, 0, f.CreatedAt));
+                }
             }
         }
 
@@ -689,7 +721,9 @@ public sealed class SftpSubsystem : IDisposable
             var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
 
             if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+            {
                 return (new VfsEntry(Path.GetFileName(subPath), false, f.OriginalFileSize, f.CreatedAt), f);
+            }
         }
 
         // Check for directory prefix
@@ -722,7 +756,9 @@ public sealed class SftpSubsystem : IDisposable
             var iv = Convert.FromBase64String(f.IvBase64);
             var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
             if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+            {
                 return f;
+            }
         }
 
         return null;
@@ -734,16 +770,31 @@ public sealed class SftpSubsystem : IDisposable
 
     private static string NormalizePath(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || path == ".") return "/";
+        if (string.IsNullOrWhiteSpace(path) || path == ".")
+        {
+            return "/";
+        }
+
         path = path.Replace('\\', '/');
-        if (!path.StartsWith('/')) path = "/" + path;
+        if (!path.StartsWith('/'))
+        {
+            path = "/" + path;
+        }
+
         // Resolve ".." segments
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var stack = new Stack<string>();
         foreach (var seg in segments)
         {
-            if (seg == "..") { if (stack.Count > 0) stack.Pop(); }
-            else if (seg != ".") stack.Push(seg);
+            if (seg == "..") { if (stack.Count > 0)
+                {
+                    stack.Pop();
+                }
+            }
+            else if (seg != ".")
+            {
+                stack.Push(seg);
+            }
         }
         return "/" + string.Join("/", stack.Reverse());
     }
@@ -773,8 +824,16 @@ public sealed class SftpSubsystem : IDisposable
         using var ms = new MemoryStream();
         var w = new SftpWriter(ms);
         w.WriteUInt32(flags);
-        if ((flags & ATTR_SIZE) != 0) w.WriteUInt64((ulong)size);
-        if ((flags & ATTR_PERMS) != 0) w.WriteUInt32(perms);
+        if ((flags & ATTR_SIZE) != 0)
+        {
+            w.WriteUInt64((ulong)size);
+        }
+
+        if ((flags & ATTR_PERMS) != 0)
+        {
+            w.WriteUInt32(perms);
+        }
+
         if ((flags & ATTR_ACMODTIME) != 0)
         {
             var unix = (uint)modified.ToUnixTimeSeconds();
@@ -844,15 +903,25 @@ public sealed class SftpSubsystem : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
 
         _cts.Cancel();
         _inbound.Writer.TryComplete();
 
         foreach (var h in _handles.Values)
         {
-            if (h is ReadHandle rh) rh.Stream.Dispose();
-            if (h is WriteHandle wh) wh.Context.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (h is ReadHandle rh)
+            {
+                rh.Stream.Dispose();
+            }
+
+            if (h is WriteHandle wh)
+            {
+                wh.Context.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
         }
         _handles.Clear();
 
@@ -905,12 +974,31 @@ public sealed class SftpSubsystem : IDisposable
 
         public void SkipAttrs()
         {
-            if (_pos >= _data.Length) return;
+            if (_pos >= _data.Length)
+            {
+                return;
+            }
+
             var flags = ReadUInt32();
-            if ((flags & ATTR_SIZE) != 0) _pos += 8;
-            if ((flags & ATTR_UIDGID) != 0) _pos += 8;
-            if ((flags & ATTR_PERMS) != 0) _pos += 4;
-            if ((flags & ATTR_ACMODTIME) != 0) _pos += 8;
+            if ((flags & ATTR_SIZE) != 0)
+            {
+                _pos += 8;
+            }
+
+            if ((flags & ATTR_UIDGID) != 0)
+            {
+                _pos += 8;
+            }
+
+            if ((flags & ATTR_PERMS) != 0)
+            {
+                _pos += 4;
+            }
+
+            if ((flags & ATTR_ACMODTIME) != 0)
+            {
+                _pos += 8;
+            }
         }
     }
 

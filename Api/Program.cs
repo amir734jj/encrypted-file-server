@@ -8,6 +8,7 @@ using Api.Data.Entities;
 using EfCoreRepository.Extensions;
 using Api.Extensions;
 using Api.Ftp;
+using Api.Interfaces;
 using Api.Middleware;
 using Api.Services;
 using Api.Services.Backend;
@@ -133,7 +134,7 @@ builder.Services.AddSingleton<IEncryptionProvider, AesGcmEncryptionProvider>();
 builder.Services.AddSingleton<IEncryptionProvider, ChaCha20EncryptionProvider>();
 builder.Services.AddSingleton<IEncryptionProvider, NoneEncryptionProvider>();
 builder.Services.AddSingleton<Api.Interfaces.IEncryptionProviderFactory, EncryptionProviderFactory>();
-builder.Services.AddSingleton<Api.Services.ITemplateService, Api.Services.TemplateService>();
+builder.Services.AddSingleton<ITemplateService, Api.Services.TemplateService>();
 builder.Services.AddSingleton<IBackendStorageProvider, FtpBackendStorageProvider>();
 builder.Services.AddSingleton<IBackendStorageProvider, Api.Services.Backend.SftpBackendStorageProvider>();
 builder.Services.AddSingleton<IBackendStorageProviderFactory, Api.Services.Backend.BackendStorageProviderFactory>();
@@ -166,7 +167,10 @@ builder.Services.AddSingleton<IPasvAddressResolver>(sp =>
     System.Net.IPAddress? publicIp = null;
     var publicAddress = config["Ftp:PublicAddress"];
     if (string.IsNullOrEmpty(publicAddress))
+    {
         publicAddress = config["Ftp:PublicHostname"];
+    }
+
     if (!string.IsNullOrEmpty(publicAddress))
     {
         if (!System.Net.IPAddress.TryParse(publicAddress, out publicIp))
@@ -279,9 +283,13 @@ app.MapFallback("api/{**rest}", async context =>
 });
 
 if (app.Environment.IsDevelopment())
+{
     app.MapFallback(() => Results.Text("Encrypted File Server API is running."));
+}
 else
+{
     app.MapFallbackToFile("index.html");
+}
 
 await app.RunAsync();
 
@@ -297,7 +305,9 @@ static X509Certificate2 LoadOrGenerateFtpCertificate()
     var pfxPath = Path.Combine(dataDir, "ftp_tls.pfx");
 
     if (File.Exists(pfxPath))
+    {
         return X509CertificateLoader.LoadPkcs12FromFile(pfxPath, null);
+    }
 
     using var rsa = RSA.Create(2048);
     var req = new CertificateRequest("CN=EncryptedFileServer", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);

@@ -1,12 +1,8 @@
+using Api.Interfaces;
 using Api.ViewModels;
 using RazorLight;
 
 namespace Api.Services;
-
-public interface ITemplateService
-{
-    Task<string> RenderDirectoryListingAsync(DirectoryListingViewModel model);
-}
 
 public sealed class TemplateService : ITemplateService
 {

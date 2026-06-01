@@ -58,7 +58,10 @@ public sealed class RawBrowseController(
     public async Task<IActionResult> ListOrDownload(Guid dataSourceId, string? path = null)
     {
         var (ds, error) = await AuthorizeDataSource(dataSourceId);
-        if (error is not null) return error;
+        if (error is not null)
+        {
+            return error;
+        }
 
         path = NormalizePath(path);
 
@@ -90,7 +93,9 @@ public sealed class RawBrowseController(
         {
             var storageName = System.IO.Path.GetFileName(f.StoragePath);
             if (string.IsNullOrEmpty(storageName))
+            {
                 storageName = f.Id.ToString();
+            }
 
             entries.Add(new EntryViewModel
             {
@@ -123,7 +128,9 @@ public sealed class RawBrowseController(
     private async Task<Guid?> ResolveUserId()
     {
         if (User.Identity?.IsAuthenticated == true)
+        {
             return User.GetUserId();
+        }
 
         return await TryBasicAuthUserId();
     }
@@ -132,7 +139,9 @@ public sealed class RawBrowseController(
     {
         var authHeader = Request.Headers.Authorization.ToString();
         if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+        {
             return null;
+        }
 
         var encoded = authHeader["Basic ".Length..].Trim();
         var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
@@ -147,11 +156,17 @@ public sealed class RawBrowseController(
             project: t => t,
             maxResults: 1)).ToList();
 
-        if (tickets.Count == 0) return null;
+        if (tickets.Count == 0)
+        {
+            return null;
+        }
 
         var ticket = tickets.First();
         var owner = await userManager.FindByIdAsync(ticket.UserId.ToString());
-        if (owner is null || !owner.IsActive) return null;
+        if (owner is null || !owner.IsActive)
+        {
+            return null;
+        }
 
         return ticket.UserId;
     }
@@ -163,18 +178,31 @@ public sealed class RawBrowseController(
             project: d => d,
             maxResults: 1)).ToList();
 
-        if (dataSources.Count == 0) return (null, NotFound());
+        if (dataSources.Count == 0)
+        {
+            return (null, NotFound());
+        }
 
         var ds = dataSources.First();
         var httpFrontend = ds.GetFrontend(FrontendType.Http);
-        if (httpFrontend is null) return (null, NotFound());
+        if (httpFrontend is null)
+        {
+            return (null, NotFound());
+        }
 
-        if (httpFrontend.AllowAnonymous) return (ds, null);
+        if (httpFrontend.AllowAnonymous)
+        {
+            return (ds, null);
+        }
 
         if (User.Identity?.IsAuthenticated == true)
         {
             var currentUserId = User.GetUserId();
-            if (currentUserId != ds.UserId) return (null, Forbid());
+            if (currentUserId != ds.UserId)
+            {
+                return (null, Forbid());
+            }
+
             return (ds, null);
         }
 
@@ -199,7 +227,10 @@ public sealed class RawBrowseController(
             if (tickets.Count > 0)
             {
                 var owner = await userManager.FindByIdAsync(tickets.First().UserId.ToString());
-                if (owner is not null && owner.IsActive) return (ds, null);
+                if (owner is not null && owner.IsActive)
+                {
+                    return (ds, null);
+                }
             }
         }
 
@@ -209,7 +240,11 @@ public sealed class RawBrowseController(
 
     private static string NormalizePath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
         path = path.Replace('\\', '/').Trim('/');
         return path.Length > 0 ? path + "/" : string.Empty;
     }

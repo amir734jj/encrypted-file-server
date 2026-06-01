@@ -58,7 +58,9 @@ public sealed class AesCtrEncryptionProvider : IEncryptionProvider
     {
         for (var i = counter.Length - 1; i >= 0; i--)
             if (++counter[i] != 0)
+            {
                 break;
+            }
     }
 
     private sealed class AesCtrStream : Stream
@@ -106,7 +108,9 @@ public sealed class AesCtrEncryptionProvider : IEncryptionProvider
             while (pos < data.Length)
             {
                 if (_keystreamPos >= 16)
+                {
                     NextKeystreamBlock();
+                }
 
                 var available = 16 - _keystreamPos;
                 var chunk = Math.Min(available, data.Length - pos);
@@ -195,7 +199,10 @@ public sealed class AesCtrEncryptionProvider : IEncryptionProvider
             {
                 _ecb.Dispose();
                 _aes.Dispose();
-                if (!_leaveOpen) _inner.Dispose();
+                if (!_leaveOpen)
+                {
+                    _inner.Dispose();
+                }
             }
             base.Dispose(disposing);
         }
@@ -204,7 +211,10 @@ public sealed class AesCtrEncryptionProvider : IEncryptionProvider
         {
             _ecb.Dispose();
             _aes.Dispose();
-            if (!_leaveOpen) await _inner.DisposeAsync();
+            if (!_leaveOpen)
+            {
+                await _inner.DisposeAsync();
+            }
         }
     }
 }

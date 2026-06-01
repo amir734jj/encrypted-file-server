@@ -90,7 +90,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        if (!Auth.IsAuthenticated || !Auth.IsAdmin) return;
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin)
+        {
+            return;
+        }
+
         await LoadAsync();
     }
 
@@ -129,7 +133,10 @@ else
     private async Task Delete(UserDto user)
     {
         var confirmed = await MessageBox.ConfirmAsync($"Delete user '{user.Email}'? This cannot be undone.");
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            return;
+        }
 
         await Api.DeleteUserAsync(user.Id);
         await LoadAsync();

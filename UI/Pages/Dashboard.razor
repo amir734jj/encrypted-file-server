@@ -78,7 +78,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        if (!Auth.IsAuthenticated) return;
+        if (!Auth.IsAuthenticated)
+        {
+            return;
+        }
+
         _host = new Uri(Nav.BaseUri).Host;
 
         try

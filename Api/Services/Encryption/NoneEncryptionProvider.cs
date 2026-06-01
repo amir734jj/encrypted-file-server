@@ -50,7 +50,11 @@ public sealed class NoneEncryptionProvider : IEncryptionProvider
         protected override void Dispose(bool disposing)
         {
             // Do NOT dispose inner — the caller (StreamingWriteHandle) disposes the backend stream separately
-            if (disposing) inner.Flush();
+            if (disposing)
+            {
+                inner.Flush();
+            }
+
             base.Dispose(disposing);
         }
 

@@ -29,15 +29,3 @@ public interface IBackendStorageProvider
     /// <summary>Renames/moves a file on the remote backend. Returns the new full storage path.</summary>
     Task<string> RenameAsync(BackendConnectionInfo connection, string oldStoragePath, string newRelativePath, CancellationToken ct = default);
 }
-
-/// <summary>
-/// Connection details for a backend storage target (e.g. remote FTP server).
-/// </summary>
-public record BackendConnectionInfo(
-    string Host,
-    int Port,
-    string Username,
-    string Password,
-    string BasePath,
-    bool UseSsl,
-    BackendStorageType Protocol = BackendStorageType.FtpClient);

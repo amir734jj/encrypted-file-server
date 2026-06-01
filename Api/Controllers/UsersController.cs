@@ -33,7 +33,10 @@ public sealed class UsersController(UserManager<User> users, AppDbContext db) : 
     public async Task<IActionResult> Activate(Guid id)
     {
         var user = await users.FindByIdAsync(id.ToString());
-        if (user is null) return NotFound();
+        if (user is null)
+        {
+            return NotFound();
+        }
 
         user.IsActive = true;
         await users.UpdateAsync(user);
@@ -44,7 +47,10 @@ public sealed class UsersController(UserManager<User> users, AppDbContext db) : 
     public async Task<IActionResult> Deactivate(Guid id)
     {
         var user = await users.FindByIdAsync(id.ToString());
-        if (user is null) return NotFound();
+        if (user is null)
+        {
+            return NotFound();
+        }
 
         user.IsActive = false;
         await users.UpdateAsync(user);
@@ -59,7 +65,10 @@ public sealed class UsersController(UserManager<User> users, AppDbContext db) : 
     public async Task<IActionResult> Delete(Guid id)
     {
         var user = await users.FindByIdAsync(id.ToString());
-        if (user is null) return NotFound();
+        if (user is null)
+        {
+            return NotFound();
+        }
 
         // Revoke all access tickets before deleting
         await db.AccessTickets.Where(t => t.UserId == id).ExecuteDeleteAsync();
@@ -72,7 +81,10 @@ public sealed class UsersController(UserManager<User> users, AppDbContext db) : 
     public async Task<IActionResult> MakeAdmin(Guid id)
     {
         var user = await users.FindByIdAsync(id.ToString());
-        if (user is null) return NotFound();
+        if (user is null)
+        {
+            return NotFound();
+        }
 
         await users.RemoveFromRoleAsync(user, Roles.User);
         await users.AddToRoleAsync(user, Roles.Admin);
@@ -83,7 +95,10 @@ public sealed class UsersController(UserManager<User> users, AppDbContext db) : 
     public async Task<IActionResult> MakeUser(Guid id)
     {
         var user = await users.FindByIdAsync(id.ToString());
-        if (user is null) return NotFound();
+        if (user is null)
+        {
+            return NotFound();
+        }
 
         await users.RemoveFromRoleAsync(user, Roles.Admin);
         await users.AddToRoleAsync(user, Roles.User);

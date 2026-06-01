@@ -13,18 +13,27 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
     public string ProviderKey => "sftp-client";
     public BackendStorageType StorageType => BackendStorageType.SftpClient;
 
-    public async Task<(Stream stream, string storagePath)> OpenWriteAsync(
+    public Task<(Stream stream, string storagePath)> OpenWriteAsync(
         BackendConnectionInfo connection, string relativePath, CancellationToken ct = default)
     {
-        var storagePath = $"{connection.BasePath.TrimEnd('/')}/{relativePath}";
-        var client = Connect(connection);
+        try
+        {
+            var storagePath = $"{connection.BasePath.TrimEnd('/')}/{relativePath}";
+            var client = Connect(connection);
 
-        var dir = Path.GetDirectoryName(storagePath)?.Replace('\\', '/');
-        if (!string.IsNullOrEmpty(dir))
-            EnsureDirectoryExists(client, dir);
+            var dir = Path.GetDirectoryName(storagePath)?.Replace('\\', '/');
+            if (!string.IsNullOrEmpty(dir))
+            {
+                EnsureDirectoryExists(client, dir);
+            }
 
-        var stream = client.OpenWrite(storagePath);
-        return (new SftpWriteStream(stream, client), storagePath);
+            var stream = client.OpenWrite(storagePath);
+            return Task.FromResult<(Stream stream, string storagePath)>((new SftpWriteStream(stream, client), storagePath));
+        }
+        catch (Exception exception)
+        {
+            return Task.FromException<(Stream stream, string storagePath)>(exception);
+        }
     }
 
     public Task<Stream> OpenReadAsync(
@@ -40,7 +49,9 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
     {
         using var client = Connect(connection);
         if (!client.Exists(storagePath))
+        {
             return Task.FromResult(false);
+        }
 
         client.DeleteFile(storagePath);
         return Task.FromResult(true);
@@ -61,7 +72,9 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
 
         var dir = Path.GetDirectoryName(newStoragePath)?.Replace('\\', '/');
         if (!string.IsNullOrEmpty(dir))
+        {
             EnsureDirectoryExists(client, dir);
+        }
 
         client.RenameFile(oldStoragePath, newStoragePath);
         return Task.FromResult(newStoragePath);
@@ -82,7 +95,9 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
         {
             current += $"/{part}";
             if (!client.Exists(current))
+            {
                 client.CreateDirectory(current);
+            }
         }
     }
 

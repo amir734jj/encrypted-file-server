@@ -30,13 +30,19 @@ public sealed class DataSourcesController(
     public async Task<IActionResult> Create([FromBody] CreateDataSourceRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Name))
+        {
             return BadRequest("Data source name is required.");
+        }
 
         if (string.IsNullOrWhiteSpace(req.Backend.Host))
+        {
             return BadRequest("Backend host is required.");
+        }
 
         if (await dataSourceService.ExistsByNameAsync(CurrentUserId, req.Name))
+        {
             return Conflict($"Data source '{req.Name}' already exists.");
+        }
 
         var ds = await dataSourceService.CreateAsync(CurrentUserId, req);
         return Ok(ds);
@@ -46,10 +52,14 @@ public sealed class DataSourcesController(
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateDataSourceRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Name))
+        {
             return BadRequest("Data source name is required.");
+        }
 
         if (string.IsNullOrWhiteSpace(req.Backend.Host))
+        {
             return BadRequest("Backend host is required.");
+        }
 
         var updated = await dataSourceService.UpdateAsync(id, CurrentUserId, req);
         return updated ? NoContent() : NotFound();
@@ -66,7 +76,9 @@ public sealed class DataSourcesController(
     public async Task<IActionResult> DecryptAll(Guid id)
     {
         if (await dataSourceService.GetByIdAsync(id, CurrentUserId) is null)
+        {
             return NotFound();
+        }
 
         var files = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
@@ -90,7 +102,9 @@ public sealed class DataSourcesController(
     public async Task<IActionResult> ReEncryptAll(Guid id, [FromQuery] EncryptionMethod method)
     {
         if (await dataSourceService.GetByIdAsync(id, CurrentUserId) is null)
+        {
             return NotFound();
+        }
 
         var files = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],

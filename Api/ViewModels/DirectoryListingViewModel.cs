@@ -13,12 +13,3 @@ public sealed class DirectoryListingViewModel
     public string AccentColor { get; init; } = "#00d4ff";
     public string AccentColorLight { get; init; } = "#0066cc";
 }
-
-public sealed class EntryViewModel
-{
-    public required string Name { get; init; }
-    public required string Href { get; init; }
-    public string? RawHref { get; init; }
-    public long? Size { get; init; }
-    public DateTimeOffset? Modified { get; init; }
-}

@@ -24,7 +24,10 @@ public sealed class EncryptionProviderFactory : IEncryptionProviderFactory
     public IEncryptionProvider GetProvider(EncryptionMethod method)
     {
         if (MethodToKey.TryGetValue(method, out var key) && _providers.TryGetValue(key, out var provider))
+        {
             return provider;
+        }
+
         throw new ArgumentException($"Unknown encryption method: {method}. Available: {string.Join(", ", MethodToKey.Keys)}");
     }
 

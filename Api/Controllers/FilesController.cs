@@ -26,7 +26,11 @@ public sealed class FilesController(
     public async Task<IActionResult> GetAll([FromQuery] Guid dataSourceId, [FromQuery] string path = "")
     {
         var ds = await GetDataSource(dataSourceId);
-        if (ds is null) return NotFound();
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var defaultMethod = ds.Backend.EncryptionMethod;
 
@@ -52,7 +56,9 @@ public sealed class FilesController(
         foreach (var (file, fullPath, contentType) in decrypted)
         {
             if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+            {
                 continue;
+            }
 
             var relativePath = fullPath[path.Length..];
             var slashIndex = relativePath.IndexOf('/');
@@ -67,9 +73,13 @@ public sealed class FilesController(
             {
                 var folderName = relativePath[..slashIndex];
                 if (subfolders.TryGetValue(folderName, out var existing))
+                {
                     subfolders[folderName] = (existing.count + 1, existing.size + file.OriginalFileSize);
+                }
                 else
+                {
                     subfolders[folderName] = (1, file.OriginalFileSize);
+                }
             }
         }
 
@@ -85,11 +95,15 @@ public sealed class FilesController(
     public async Task<IActionResult> Upload([FromQuery] Guid dataSourceId, [FromQuery] string path = "", IFormFile? file = null)
     {
         if (file is null)
+        {
             return BadRequest("No file provided.");
+        }
 
         var dsExists = await DataSourceDal.Any(filterExprs: [d => d.Id == dataSourceId && d.UserId == CurrentUserId]);
         if (!dsExists)
+        {
             return NotFound("Data source not found.");
+        }
 
         path = NormalizePath(path);
         var fullPath = path + file.FileName;
@@ -117,11 +131,18 @@ public sealed class FilesController(
             filterExprs: [f => f.Id == id && f.UserId == CurrentUserId],
             project: f => f,
             maxResults: 1)).ToList();
-        if (files.Count == 0) return NotFound();
+        if (files.Count == 0)
+        {
+            return NotFound();
+        }
 
         var file = files.First();
         var ds = await GetDataSource(file.DataSourceId);
-        if (ds is null) return NotFound();
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
         var encryption = encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
 
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
@@ -143,7 +164,10 @@ public sealed class FilesController(
             filterExprs: [f => f.Id == id && f.UserId == CurrentUserId],
             project: f => f,
             maxResults: 1)).ToList();
-        if (files.Count == 0) return NotFound();
+        if (files.Count == 0)
+        {
+            return NotFound();
+        }
 
         await fileStorage.DeleteFileAsync(files.First());
         return NoContent();
@@ -154,10 +178,16 @@ public sealed class FilesController(
     {
         path = NormalizePath(path);
         if (string.IsNullOrEmpty(path))
+        {
             return BadRequest("Cannot delete root folder.");
+        }
 
         var ds = await GetDataSource(dataSourceId);
-        if (ds is null) return NotFound();
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var defaultMethod = ds.Backend.EncryptionMethod;
 
@@ -190,7 +220,11 @@ public sealed class FilesController(
 
     private static string NormalizePath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
         path = path.Replace('\\', '/').Trim('/');
         return path.Length > 0 ? path + "/" : string.Empty;
     }

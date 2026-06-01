@@ -29,7 +29,10 @@ public sealed class SftpFrontendDataSource(EncryptedSftpServer sftpServer) : IFr
     public ValueTask DisposeAsync()
     {
         if (IsRunning)
+        {
             sftpServer.Stop();
+        }
+
         return ValueTask.CompletedTask;
     }
 }

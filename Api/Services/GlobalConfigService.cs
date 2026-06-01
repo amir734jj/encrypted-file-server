@@ -31,17 +31,25 @@ public sealed class GlobalConfigService(
         foreach (var (property, attr) in ConfigProperties)
         {
             if (!rows.TryGetValue(attr.Name, out var value))
+            {
                 continue;
+            }
 
             try
             {
                 object converted;
                 if (property.PropertyType == typeof(bool))
+                {
                     converted = bool.TryParse(value, out var b) && b;
+                }
                 else if (property.PropertyType == typeof(int))
+                {
                     converted = int.TryParse(value, out var i) ? i : 0;
+                }
                 else
+                {
                     converted = Convert.ChangeType(value, property.PropertyType);
+                }
 
                 property.SetValue(model, converted);
             }
@@ -98,7 +106,9 @@ public sealed class GlobalConfigService(
         foreach (var (property, attr) in ConfigProperties)
         {
             if (existing.Contains(attr.Name))
+            {
                 continue;
+            }
 
             await Dal.Save(new GlobalConfig
             {
@@ -117,7 +127,10 @@ public sealed class GlobalConfigService(
 
     private string InvokeHandler(GlobalConfigColAttribute attr, string value)
     {
-        if (attr.OnChangeHandler is null) return value;
+        if (attr.OnChangeHandler is null)
+        {
+            return value;
+        }
 
         if (serviceProvider.GetService(attr.OnChangeHandler) is IGlobalConfigChangeHandler handler)
         {

@@ -98,7 +98,10 @@ public sealed class AuthController(
     public async Task<IActionResult> Impersonate(Guid userId)
     {
         var targetUser = await users.FindByIdAsync(userId.ToString());
-        if (targetUser is null) return NotFound();
+        if (targetUser is null)
+        {
+            return NotFound();
+        }
 
         var targetRoles = await users.GetRolesAsync(targetUser);
         var role = targetRoles.FirstOrDefault() ?? Roles.User;

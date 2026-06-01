@@ -64,7 +64,10 @@ public sealed class BrowseController(
     public async Task<IActionResult> ListOrDownload(Guid dataSourceId, string? path = null, [FromQuery] bool raw = false)
     {
         var (ds, masterKey, error) = await AuthorizeDataSource(dataSourceId);
-        if (error is not null) return error;
+        if (error is not null)
+        {
+            return error;
+        }
 
         var defaultEncryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
         var defaultMethod = ds.Backend.EncryptionMethod;
@@ -118,7 +121,9 @@ public sealed class BrowseController(
             var fullPath = fileEncryption.DecryptString(f.OriginalFileName, masterKey!, iv);
 
             if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+            {
                 continue;
+            }
 
             var relativePath = fullPath[path.Length..];
             var slashIndex = relativePath.IndexOf('/');
@@ -140,11 +145,13 @@ public sealed class BrowseController(
             {
                 var folderName = relativePath[..slashIndex];
                 if (seenFolders.Add(folderName))
+                {
                     entries.Add(new EntryViewModel
                     {
                         Name = folderName,
                         Href = $"/browse/{dataSourceId}/{path}{folderName}/"
                     });
+                }
             }
         }
 
@@ -171,7 +178,10 @@ public sealed class BrowseController(
     private Guid? GetAuthenticatedUserId()
     {
         if (User.Identity?.IsAuthenticated == true)
+        {
             return User.GetUserId();
+        }
+
         return null;
     }
 
@@ -179,7 +189,9 @@ public sealed class BrowseController(
     {
         var authHeader = Request.Headers.Authorization.ToString();
         if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+        {
             return null;
+        }
 
         var encoded = authHeader["Basic ".Length..].Trim();
         var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
@@ -195,14 +207,18 @@ public sealed class BrowseController(
             maxResults: 1)).ToList();
 
         if (tickets.Count == 0)
+        {
             return null;
+        }
 
         var ticket = tickets.First();
 
         // Reject if the ticket owner's account is disabled
         var ticketOwner = await userManager.FindByIdAsync(ticket.UserId.ToString());
         if (ticketOwner is null || !ticketOwner.IsActive)
+        {
             return null;
+        }
 
         return ticket.UserId;
     }
@@ -215,24 +231,32 @@ public sealed class BrowseController(
             maxResults: 1)).ToList();
 
         if (dataSources.Count == 0)
+        {
             return (null, null, NotFound());
+        }
 
         var ds = dataSources.First();
         var httpFrontend = ds.GetFrontend(FrontendType.Http);
 
         if (httpFrontend is null)
+        {
             return (null, null, NotFound());
+        }
 
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
 
         if (httpFrontend.AllowAnonymous)
+        {
             return (ds, masterKey, null);
+        }
 
         if (User.Identity?.IsAuthenticated == true)
         {
             var currentUserId = User.GetUserId();
             if (currentUserId != ds.UserId)
+            {
                 return (null, null, Forbid());
+            }
 
             return (ds, masterKey, null);
         }
@@ -260,7 +284,9 @@ public sealed class BrowseController(
                 // Reject if the ticket owner's account is disabled
                 var ticketOwner = await userManager.FindByIdAsync(tickets.First().UserId.ToString());
                 if (ticketOwner is not null && ticketOwner.IsActive)
+                {
                     return (ds, masterKey, null);
+                }
             }
         }
 
@@ -270,7 +296,11 @@ public sealed class BrowseController(
 
     private static string NormalizePath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
         path = path.Replace('\\', '/').Trim('/');
         return path.Length > 0 ? path + "/" : string.Empty;
     }

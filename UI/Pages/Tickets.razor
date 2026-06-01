@@ -205,7 +205,10 @@ else
     private async Task DeleteTicket(AccessTicketDto ticket)
     {
         var confirmed = await MessageBox.ConfirmAsync($"Revoke ticket '{ticket.Username}'?");
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            return;
+        }
 
         try
         {
@@ -229,7 +232,10 @@ else
 
     private async Task ExtendTicket()
     {
-        if (_extendingTicket is null) return;
+        if (_extendingTicket is null)
+        {
+            return;
+        }
 
         try
         {

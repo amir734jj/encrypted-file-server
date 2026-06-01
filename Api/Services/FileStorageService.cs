@@ -24,7 +24,9 @@ public sealed class FileStorageService(
             project: d => d,
             maxResults: 1)).ToList();
         if (dataSources.Count == 0)
+        {
             throw new UnauthorizedAccessException("Data source does not belong to the user.");
+        }
 
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
@@ -74,7 +76,9 @@ public sealed class FileStorageService(
             project: d => d,
             maxResults: 1)).ToList();
         if (dataSources.Count == 0)
+        {
             throw new UnauthorizedAccessException("Data source does not belong to the user.");
+        }
 
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
@@ -149,7 +153,9 @@ public sealed class FileStorageService(
         var ds = await GetDataSource(file.DataSourceId);
         var currentMethod = file.EncryptionMethod ?? ds.Backend.EncryptionMethod;
         if (currentMethod == EncryptionMethod.None)
+        {
             return file; // already decrypted
+        }
 
         var oldEncryption = encryptionFactory.GetProvider(currentMethod);
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
@@ -199,7 +205,9 @@ public sealed class FileStorageService(
         var ds = await GetDataSource(file.DataSourceId);
         var currentMethod = file.EncryptionMethod ?? ds.Backend.EncryptionMethod;
         if (currentMethod == newMethod)
+        {
             return file; // already using that method
+        }
 
         var oldEncryption = encryptionFactory.GetProvider(currentMethod);
         var newEncryption = encryptionFactory.GetProvider(newMethod);
@@ -278,7 +286,10 @@ public sealed class FileStorageService(
             project: d => d,
             maxResults: 1)).ToList();
         if (dataSources.Count == 0)
+        {
             throw new InvalidOperationException("Data source not found.");
+        }
+
         return dataSources.First();
     }
 

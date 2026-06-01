@@ -8,7 +8,9 @@ public static class UrlUtility
     {
         var isUrl = Uri.TryCreate(connectionStringUrl, UriKind.Absolute, out var url);
         if (!isUrl || url is null)
+        {
             return ImmutableDictionary.Create<string, string>();
+        }
 
         var connectionStringBuilder = new Dictionary<string, string>
         {
