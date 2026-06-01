@@ -32,7 +32,7 @@ public sealed class DataSourceMapping : IEntityTypeConfiguration<DataSource>
                 .HasConversion<string>()
                 .HasMaxLength(50)
                 .HasColumnName("EncryptionMethod");
-            b.Property(x => x.MasterPassword).HasMaxLength(500).IsRequired().HasColumnName("BackendMasterPassword");
+            b.Property(x => x.MasterPassword).HasMaxLength(500).HasColumnName("BackendMasterPassword");
         });
 
         builder.OwnsMany(d => d.Frontends, f =>
