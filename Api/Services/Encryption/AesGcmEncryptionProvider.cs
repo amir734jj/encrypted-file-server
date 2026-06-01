@@ -2,9 +2,8 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Shared.Interfaces;
-using CryptoAesGcm = System.Security.Cryptography.AesGcm;
 
-namespace Api.Services.Encryption.AesGcm;
+namespace Api.Services.Encryption;
 
 public sealed class AesGcmEncryptionProvider : IEncryptionProvider
 {
@@ -30,7 +29,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         var data = Encoding.UTF8.GetBytes(plaintext);
         var ciphertext = new byte[data.Length];
         var tag = new byte[TagSize];
-        using var aes = new CryptoAesGcm(masterKey, TagSize);
+        using var aes = new AesGcm(masterKey, TagSize);
         aes.Encrypt(iv, data, ciphertext, tag);
         var result = new byte[tag.Length + ciphertext.Length];
         Buffer.BlockCopy(tag, 0, result, 0, tag.Length);
@@ -44,7 +43,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         var tag = combined.AsSpan(0, TagSize);
         var encrypted = combined.AsSpan(TagSize);
         var plaintext = new byte[encrypted.Length];
-        using var aes = new CryptoAesGcm(masterKey, TagSize);
+        using var aes = new AesGcm(masterKey, TagSize);
         aes.Decrypt(iv, encrypted, tag, plaintext);
         return Encoding.UTF8.GetString(plaintext);
     }
@@ -57,7 +56,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
     private sealed class AesGcmEncryptStream : Stream
     {
         private readonly Stream _inner;
-        private readonly CryptoAesGcm _aes;
+        private readonly AesGcm _aes;
         private readonly byte[] _baseNonce;
         private readonly byte[] _plaintextBuf = new byte[ChunkSize];
         private readonly byte[] _ciphertextBuf = new byte[ChunkSize];
@@ -71,7 +70,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         public AesGcmEncryptStream(Stream inner, byte[] key, byte[] baseNonce)
         {
             _inner = inner;
-            _aes = new CryptoAesGcm(key, TagSize);
+            _aes = new AesGcm(key, TagSize);
             _baseNonce = baseNonce;
         }
 
@@ -211,7 +210,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
     private sealed class AesGcmDecryptStream : Stream
     {
         private readonly Stream _inner;
-        private readonly CryptoAesGcm _aes;
+        private readonly AesGcm _aes;
         private readonly byte[] _baseNonce;
         private readonly byte[] _headerBuf = new byte[4];
         private readonly byte[] _tagBuf = new byte[TagSize];
@@ -227,7 +226,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         public AesGcmDecryptStream(Stream inner, byte[] key, byte[] baseNonce)
         {
             _inner = inner;
-            _aes = new CryptoAesGcm(key, TagSize);
+            _aes = new AesGcm(key, TagSize);
             _baseNonce = baseNonce;
         }
 

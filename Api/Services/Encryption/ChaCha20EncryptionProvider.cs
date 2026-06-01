@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Shared.Interfaces;
 
-namespace Api.Services.Encryption.ChaCha20;
+namespace Api.Services.Encryption;
 
 public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
 {

@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Shared.Interfaces;
 
-namespace Api.Services.Encryption.AesCtr;
+namespace Api.Services.Encryption;
 
 public sealed class AesCtrEncryptionProvider : IEncryptionProvider
 {
