@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using Api.Data;
@@ -45,8 +46,14 @@ public sealed class SftpSubsystem : IDisposable
     private const uint DIR_MODE = S_IFDIR | 0x1ED;   // drwxr-xr-x
     private const uint FILE_MODE = S_IFREG | 0x1A4;  // -rw-r--r--
 
+    // SFTP v3 packet types (additional)
+    private const byte SSH_FXP_RENAME = 18;
+
+    // READDIR pagination
+    private const int MaxEntriesPerReaddir = 100;
+
     // Handle types
-    private sealed record DirHandle(List<VfsEntry> Entries, bool Sent);
+    private sealed record DirHandle(List<VfsEntry> Entries, int Offset);
     private sealed record ReadHandle(EncryptedFile File, Stream Stream, long Position);
     private sealed record WriteHandle(StreamingWriteHandle Context, long Position);
     private sealed record VfsEntry(string Name, bool IsDir, long Size, DateTimeOffset Modified);
@@ -62,8 +69,11 @@ public sealed class SftpSubsystem : IDisposable
     private readonly Dictionary<string, object> _handles = new();
     private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
+    private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
+    private List<DataSource>? _cachedDataSources;
     private int _handleCounter;
-    private byte[] _buffer = [];
+    private int _bufferLen;
+    private byte[] _buffer = new byte[4096];
     private Task? _processTask;
     private bool _disposed;
 
@@ -128,22 +138,32 @@ public sealed class SftpSubsystem : IDisposable
 
     private void AppendBuffer(byte[] data)
     {
-        var newBuf = new byte[_buffer.Length + data.Length];
-        Buffer.BlockCopy(_buffer, 0, newBuf, 0, _buffer.Length);
-        Buffer.BlockCopy(data, 0, newBuf, _buffer.Length, data.Length);
-        _buffer = newBuf;
+        var needed = _bufferLen + data.Length;
+        if (needed > _buffer.Length)
+        {
+            var newSize = Math.Max(_buffer.Length * 2, needed);
+            var newBuf = new byte[newSize];
+            Buffer.BlockCopy(_buffer, 0, newBuf, 0, _bufferLen);
+            _buffer = newBuf;
+        }
+        Buffer.BlockCopy(data, 0, _buffer, _bufferLen, data.Length);
+        _bufferLen += data.Length;
     }
 
     private bool TryReadPacket(out byte type, out byte[] payload)
     {
         type = 0;
         payload = [];
-        if (_buffer.Length < 5) return false;
+        if (_bufferLen < 5) return false;
         var length = (int)BinaryPrimitives.ReadUInt32BigEndian(_buffer);
-        if (_buffer.Length < 4 + length) return false;
+        if (_bufferLen < 4 + length) return false;
         type = _buffer[4];
         payload = _buffer[5..(4 + length)];
-        _buffer = _buffer[(4 + length)..];
+        // Shift remaining data
+        var consumed = 4 + length;
+        _bufferLen -= consumed;
+        if (_bufferLen > 0)
+            Buffer.BlockCopy(_buffer, consumed, _buffer, 0, _bufferLen);
         return true;
     }
 
@@ -177,6 +197,7 @@ public sealed class SftpSubsystem : IDisposable
             case SSH_FXP_READ: await HandleRead(requestId, r); break;
             case SSH_FXP_WRITE: await HandleWrite(requestId, r); break;
             case SSH_FXP_REMOVE: await HandleRemove(requestId, r); break;
+            case SSH_FXP_RENAME: await HandleRename(requestId, r); break;
             case SSH_FXP_MKDIR: SendStatus(requestId, SSH_FX_OK); break;
             case SSH_FXP_RMDIR: SendStatus(requestId, SSH_FX_OK); break;
             case SSH_FXP_SETSTAT:
@@ -289,7 +310,7 @@ public sealed class SftpSubsystem : IDisposable
         }
 
         var handle = NextHandle();
-        _handles[handle] = new DirHandle(entries, false);
+        _handles[handle] = new DirHandle(entries, 0);
         Send(BuildHandlePacket(id, handle));
     }
 
@@ -302,24 +323,23 @@ public sealed class SftpSubsystem : IDisposable
             return;
         }
 
-        if (dh.Sent)
+        if (dh.Offset >= dh.Entries.Count)
         {
             SendStatus(id, SSH_FX_EOF);
             return;
         }
 
-        // Mark as sent — next READDIR will return EOF
-        _handles[handle] = dh with { Sent = true };
+        var batch = dh.Entries.Skip(dh.Offset).Take(MaxEntriesPerReaddir).ToList();
+        _handles[handle] = dh with { Offset = dh.Offset + batch.Count };
 
-        // Build NAME response with all entries
         Send(BuildPacket(SSH_FXP_NAME, w =>
         {
             w.WriteUInt32(id);
-            w.WriteUInt32((uint)dh.Entries.Count);
-            foreach (var e in dh.Entries)
+            w.WriteUInt32((uint)batch.Count);
+            foreach (var e in batch)
             {
                 w.WriteString(e.Name);
-                w.WriteString(FormatLongName(e)); // longname (ls -l style)
+                w.WriteString(FormatLongName(e));
                 if (e.IsDir) w.WriteAttrs(DirAttrs(e.Modified));
                 else w.WriteAttrs(FileAttrs(e.Size, e.Modified));
             }
@@ -370,7 +390,6 @@ public sealed class SftpSubsystem : IDisposable
             var file = await FindFileAsync(ds, subPath);
             if (file is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
 
-            var masterKey = await GetMasterKeyAsync(ds);
             var stream = await _fileStorage.OpenDecryptedStreamAsync(file);
 
             var handle = NextHandle();
@@ -409,22 +428,30 @@ public sealed class SftpSubsystem : IDisposable
             return;
         }
 
-        var buffer = new byte[Math.Min(len, 32768)];
-        var bytesRead = await rh.Stream.ReadAsync(buffer);
-
-        if (bytesRead == 0)
+        var readLen = (int)Math.Min(len, 32768);
+        var buffer = ArrayPool<byte>.Shared.Rent(readLen);
+        try
         {
-            SendStatus(id, SSH_FX_EOF);
-            return;
+            var bytesRead = await rh.Stream.ReadAsync(buffer.AsMemory(0, readLen));
+
+            if (bytesRead == 0)
+            {
+                SendStatus(id, SSH_FX_EOF);
+                return;
+            }
+
+            _handles[handle] = rh with { Position = rh.Position + bytesRead };
+
+            Send(BuildPacket(SSH_FXP_DATA, w =>
+            {
+                w.WriteUInt32(id);
+                w.WriteBytes(buffer.AsSpan(0, bytesRead));
+            }));
         }
-
-        _handles[handle] = rh with { Position = rh.Position + bytesRead };
-
-        Send(BuildPacket(SSH_FXP_DATA, w =>
+        finally
         {
-            w.WriteUInt32(id);
-            w.WriteBytes(buffer.AsSpan(0, bytesRead));
-        }));
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private async Task HandleWrite(uint id, SftpReader r)
@@ -498,6 +525,47 @@ public sealed class SftpSubsystem : IDisposable
         if (file is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
 
         await _fileStorage.DeleteFileAsync(file);
+        InvalidateCache();
+        SendStatus(id, SSH_FX_OK);
+    }
+
+    private async Task HandleRename(uint id, SftpReader r)
+    {
+        if (!IsAuthenticated) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
+
+        var oldPath = NormalizePath(r.ReadString());
+        var newPath = NormalizePath(r.ReadString());
+
+        var oldParts = oldPath.TrimStart('/').Split('/', 2);
+        var newParts = newPath.TrimStart('/').Split('/', 2);
+
+        if (oldParts.Length < 2 || newParts.Length < 2)
+        {
+            SendStatus(id, SSH_FX_PERMISSION_DENIED);
+            return;
+        }
+
+        // Must be within the same data source
+        if (!string.Equals(oldParts[0], newParts[0], StringComparison.OrdinalIgnoreCase))
+        {
+            SendStatus(id, SSH_FX_OP_UNSUPPORTED, "Cannot rename across data sources");
+            return;
+        }
+
+        var ds = await FindDataSourceByNameAsync(oldParts[0]);
+        if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+        var file = await FindFileAsync(ds, oldParts[1]);
+        if (file is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+        // Re-encrypt the file name with the new path
+        var masterKey = GetCachedMasterKey(ds);
+        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var iv = Convert.FromBase64String(file.IvBase64);
+
+        file.OriginalFileName = encryption.EncryptString(newParts[1], masterKey, iv);
+        await _db.SaveChangesAsync();
+        InvalidateCache();
         SendStatus(id, SSH_FX_OK);
     }
 
@@ -507,21 +575,29 @@ public sealed class SftpSubsystem : IDisposable
 
     private bool IsAuthenticated => _userId.HasValue;
 
+    private void InvalidateCache() => _cachedDataSources = null;
+
     private async Task<List<DataSource>> GetDataSourcesAsync()
     {
+        if (_cachedDataSources is not null)
+            return _cachedDataSources;
+
         if (_userId.HasValue)
         {
-            return await _db.DataSources
+            _cachedDataSources = await _db.DataSources
                 .Include(d => d.Frontends)
                 .Where(d => d.UserId == _userId && d.Frontends.Any(f => f.Type == FrontendType.Sftp))
                 .OrderBy(d => d.Name).ToListAsync();
         }
+        else
+        {
+            _cachedDataSources = await _db.DataSources
+                .Include(d => d.Frontends)
+                .Where(d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous))
+                .OrderBy(d => d.Name).ToListAsync();
+        }
 
-        // Anonymous: show data sources with anonymous SFTP
-        return await _db.DataSources
-            .Include(d => d.Frontends)
-            .Where(d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous))
-            .OrderBy(d => d.Name).ToListAsync();
+        return _cachedDataSources;
     }
 
     private async Task<DataSource?> FindDataSourceByNameAsync(string name)
@@ -530,14 +606,18 @@ public sealed class SftpSubsystem : IDisposable
         return sources.FirstOrDefault(d => d.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
-    private Task<byte[]> GetMasterKeyAsync(DataSource ds)
+    private byte[] GetCachedMasterKey(DataSource ds)
     {
-        return Task.FromResult(KeyDerivation.DeriveKey(ds.Backend.MasterPassword));
+        if (_masterKeyCache.TryGetValue(ds.Id, out var cached))
+            return cached;
+        var key = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+        _masterKeyCache[ds.Id] = key;
+        return key;
     }
 
     private async Task<List<VfsEntry>> ListDirectoryAsync(DataSource ds, string pathPrefix)
     {
-        var masterKey = await GetMasterKeyAsync(ds);
+        var masterKey = GetCachedMasterKey(ds);
         var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var files = await _db.EncryptedFiles
@@ -576,7 +656,7 @@ public sealed class SftpSubsystem : IDisposable
 
     private async Task<(VfsEntry? entry, EncryptedFile? file)> FindEntryAsync(DataSource ds, string subPath)
     {
-        var masterKey = await GetMasterKeyAsync(ds);
+        var masterKey = GetCachedMasterKey(ds);
         var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var files = await _db.EncryptedFiles
@@ -609,7 +689,7 @@ public sealed class SftpSubsystem : IDisposable
 
     private async Task<EncryptedFile?> FindFileAsync(DataSource ds, string subPath)
     {
-        var masterKey = await GetMasterKeyAsync(ds);
+        var masterKey = GetCachedMasterKey(ds);
         var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var files = await _db.EncryptedFiles

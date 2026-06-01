@@ -34,9 +34,10 @@ COPY --from=build /app/ui-publish/wwwroot ./wwwroot
 # Create storage directory
 RUN mkdir -p /app/storage
 
-# Expose HTTP + FTP ports
+# Expose HTTP + FTP + SFTP ports
 EXPOSE 5000
 EXPOSE 2121
+EXPOSE 2222
 
 # FTP passive mode ports (if needed)
 EXPOSE 50000-50100
