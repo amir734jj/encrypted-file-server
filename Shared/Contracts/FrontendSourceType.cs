@@ -8,5 +8,5 @@ public enum FrontendSourceType
     FtpServer = 0,
     HttpFileServer = 1,
     // Sftp = 2,
-    // WebDav = 3,
+    WebDav = 3,
 }

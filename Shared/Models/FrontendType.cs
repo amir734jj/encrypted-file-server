@@ -3,5 +3,6 @@ namespace Shared.Models;
 public enum FrontendType
 {
     Ftp,
-    Http
+    Http,
+    WebDav
 }
