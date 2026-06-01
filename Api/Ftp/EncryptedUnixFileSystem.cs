@@ -11,29 +11,15 @@ using Shared.Models;
 
 namespace Api.Ftp;
 
-public sealed class EncryptedUnixFileSystem : IUnixFileSystem
+public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) : IUnixFileSystem
 {
-    private readonly IServiceScope _scope;
-    private readonly Guid? _userId;
-    private readonly AppDbContext _db;
-    private readonly IFileStorageService _fileStorage;
-    private readonly IEncryptionProviderFactory _encryptionFactory;
-    private readonly IBackendStorageProviderFactory _backendStorageFactory;
+    private readonly AppDbContext _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    private readonly IFileStorageService _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
+    private readonly IEncryptionProviderFactory _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
+    private readonly IBackendStorageProviderFactory _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
 
-    public EncryptedUnixFileSystem(IServiceScope scope, Guid? userId)
-    {
-        _scope = scope;
-        _userId = userId;
-        _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
-        _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
-        _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
-
-        Root = new VirtualDirectoryEntry("/", null, null);
-    }
-
-    private bool IsAnonymous => !_userId.HasValue;
+    private bool IsAnonymous => !userId.HasValue;
 
     private async Task<byte[]> GetMasterKeyForDataSourceAsync(Guid dataSourceId)
     {
@@ -74,7 +60,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     public bool SupportsNonEmptyDirectoryDelete => true;
     public bool SupportsAppend => false;
     public StringComparer FileSystemEntryComparer => StringComparer.OrdinalIgnoreCase;
-    public IUnixDirectoryEntry Root { get; }
+    public IUnixDirectoryEntry Root { get; } = new VirtualDirectoryEntry("/", null, null);
 
     public async Task<IReadOnlyList<IUnixFileSystemEntry>> GetEntriesAsync(
         IUnixDirectoryEntry directoryEntry, CancellationToken ct)
@@ -86,7 +72,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
                     .Where(d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous))
                     .OrderBy(d => d.Name).ToListAsync(ct)
                 : await _db.DataSources
-                    .Where(d => d.UserId == _userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp))
+                    .Where(d => d.UserId == userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp))
                     .OrderBy(d => d.Name).ToListAsync(ct);
 
             return dataSources
@@ -99,9 +85,9 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             var currentPath = vde.VirtualPath ?? "";
 
             var query = _db.EncryptedFiles.Where(f => f.DataSourceId == dsId);
-            if (_userId.HasValue)
+            if (userId.HasValue)
             {
-                query = query.Where(f => f.UserId == _userId.Value);
+                query = query.Where(f => f.UserId == userId.Value);
             }
 
             var files = await query.ToListAsync(ct);
@@ -152,7 +138,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
                 ? await _db.DataSources.FirstOrDefaultAsync(
                     d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous) && d.Name == name, ct)
                 : await _db.DataSources.FirstOrDefaultAsync(
-                    d => d.UserId == _userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp) && d.Name == name, ct);
+                    d => d.UserId == userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp) && d.Name == name, ct);
             return ds is null ? null : new VirtualDirectoryEntry(ds.Name, ds.Id, "");
         }
 
@@ -161,9 +147,9 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             var currentPath = vde.VirtualPath ?? "";
 
             var query = _db.EncryptedFiles.Where(f => f.DataSourceId == dsId);
-            if (_userId.HasValue)
+            if (userId.HasValue)
             {
-                query = query.Where(f => f.UserId == _userId.Value);
+                query = query.Where(f => f.UserId == userId.Value);
             }
 
             var files = await query.ToListAsync(ct);
@@ -240,14 +226,14 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             throw new InvalidOperationException("Cannot create files in the root directory. Use a data source folder.");
         }
 
-        var dsOwned = await _db.DataSources.AnyAsync(d => d.Id == dsId && d.UserId == _userId, ct);
+        var dsOwned = await _db.DataSources.AnyAsync(d => d.Id == dsId && d.UserId == userId, ct);
         if (!dsOwned)
         {
             throw new UnauthorizedAccessException("Data source does not belong to the current user.");
         }
 
         var fullPath = (vde.VirtualPath ?? "") + fileName;
-        await _fileStorage.StoreFileAsync(_userId!.Value, dsId, fullPath, null, data);
+        await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, null, data);
         return null;
     }
 
@@ -260,7 +246,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             throw new InvalidOperationException("Unknown file entry type.");
         }
 
-        if (vfe.EncryptedFile.UserId != _userId)
+        if (vfe.EncryptedFile.UserId != userId)
         {
             throw new UnauthorizedAccessException("File does not belong to the current user.");
         }
@@ -270,7 +256,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         var encryption = await GetEncryptionForDataSourceAsync(dsId);
         var fullPath = DecryptFileName(vfe.EncryptedFile, masterKey, encryption);
         await _fileStorage.DeleteFileAsync(vfe.EncryptedFile);
-        await _fileStorage.StoreFileAsync(_userId!.Value, dsId, fullPath, null, data);
+        await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, null, data);
         return null;
     }
 
@@ -280,7 +266,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 
         if (entry is VirtualFileEntry vfe)
         {
-            if (vfe.EncryptedFile.UserId != _userId)
+            if (vfe.EncryptedFile.UserId != userId)
             {
                 throw new UnauthorizedAccessException("File does not belong to the current user.");
             }
@@ -292,14 +278,14 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             if (string.IsNullOrEmpty(vde.VirtualPath))
             {
                 var ds = await _db.DataSources.FirstOrDefaultAsync(
-                    d => d.Id == dsId && d.UserId == _userId, ct);
+                    d => d.Id == dsId && d.UserId == userId, ct);
                 if (ds is null)
                 {
                     return;
                 }
 
                 var allFiles = await _db.EncryptedFiles
-                    .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
+                    .Where(f => f.DataSourceId == dsId && f.UserId == userId)
                     .ToListAsync(ct);
                 foreach (var f in allFiles)
                     await _fileStorage.DeleteFileAsync(f);
@@ -312,7 +298,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
                 var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
                 var encryption = await GetEncryptionForDataSourceAsync(dsId);
                 var allFiles = await _db.EncryptedFiles
-                    .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
+                    .Where(f => f.DataSourceId == dsId && f.UserId == userId)
                     .ToListAsync(ct);
 
                 foreach (var f in allFiles)
@@ -355,7 +341,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 
         if (source is VirtualFileEntry vfe)
         {
-            if (vfe.EncryptedFile.UserId != _userId)
+            if (vfe.EncryptedFile.UserId != userId)
             {
                 throw new UnauthorizedAccessException("File does not belong to the current user.");
             }
@@ -405,7 +391,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             var encryption = await GetEncryptionForDataSourceAsync(sourceDsId);
 
             var allFiles = await _db.EncryptedFiles
-                .Where(f => f.DataSourceId == sourceDsId && f.UserId == _userId)
+                .Where(f => f.DataSourceId == sourceDsId && f.UserId == userId)
                 .ToListAsync(ct);
 
             foreach (var f in allFiles)
@@ -450,6 +436,6 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 
     public void Dispose()
     {
-        _scope.Dispose();
+        scope.Dispose();
     }
 }

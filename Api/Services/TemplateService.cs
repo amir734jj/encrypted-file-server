@@ -6,15 +6,10 @@ namespace Api.Services;
 
 public sealed class TemplateService : ITemplateService
 {
-    private readonly RazorLightEngine _engine;
-
-    public TemplateService()
-    {
-        _engine = new RazorLightEngineBuilder()
-            .UseEmbeddedResourcesProject(typeof(TemplateService).Assembly, "Api.Templates")
-            .UseMemoryCachingProvider()
-            .Build();
-    }
+    private readonly RazorLightEngine _engine = new RazorLightEngineBuilder()
+        .UseEmbeddedResourcesProject(typeof(TemplateService).Assembly, "Api.Templates")
+        .UseMemoryCachingProvider()
+        .Build();
 
     public async Task<string> RenderDirectoryListingAsync(DirectoryListingViewModel model)
     {

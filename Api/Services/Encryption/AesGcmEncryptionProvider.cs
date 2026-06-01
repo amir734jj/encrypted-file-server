@@ -53,11 +53,9 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
     /// All buffers are pre-allocated; zero per-chunk heap allocations.
     /// Crypto instance is reused across chunks.
     /// </summary>
-    private sealed class AesGcmEncryptStream : Stream
+    private sealed class AesGcmEncryptStream(Stream inner, byte[] key, byte[] baseNonce) : Stream
     {
-        private readonly Stream _inner;
-        private readonly AesGcm _aes;
-        private readonly byte[] _baseNonce;
+        private readonly AesGcm _aes = new(key, TagSize);
         private readonly byte[] _plaintextBuf = new byte[ChunkSize];
         private readonly byte[] _ciphertextBuf = new byte[ChunkSize];
         private readonly byte[] _tagBuf = new byte[TagSize];
@@ -66,13 +64,6 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         private int _bufferPos;
         private long _chunkIndex;
         private bool _disposed;
-
-        public AesGcmEncryptStream(Stream inner, byte[] key, byte[] baseNonce)
-        {
-            _inner = inner;
-            _aes = new AesGcm(key, TagSize);
-            _baseNonce = baseNonce;
-        }
 
         public override bool CanRead => false;
         public override bool CanWrite => true;
@@ -86,7 +77,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
 
         private void DeriveChunkNonce()
         {
-            Buffer.BlockCopy(_baseNonce, 0, _nonceBuf, 0, NonceSize);
+            Buffer.BlockCopy(baseNonce, 0, _nonceBuf, 0, NonceSize);
             Span<byte> counter = stackalloc byte[8];
             BinaryPrimitives.WriteInt64LittleEndian(counter, _chunkIndex);
             for (var i = 0; i < Math.Min(counter.Length, NonceSize); i++)
@@ -108,9 +99,9 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
                 _tagBuf);
 
             BinaryPrimitives.WriteInt32LittleEndian(_headerBuf, _bufferPos);
-            _inner.Write(_headerBuf, 0, 4);
-            _inner.Write(_tagBuf, 0, TagSize);
-            _inner.Write(_ciphertextBuf, 0, _bufferPos);
+            inner.Write(_headerBuf, 0, 4);
+            inner.Write(_tagBuf, 0, TagSize);
+            inner.Write(_ciphertextBuf, 0, _bufferPos);
 
             _bufferPos = 0;
             _chunkIndex++;
@@ -131,9 +122,9 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
                 _tagBuf);
 
             BinaryPrimitives.WriteInt32LittleEndian(_headerBuf, _bufferPos);
-            await _inner.WriteAsync(_headerBuf.AsMemory(0, 4), ct);
-            await _inner.WriteAsync(_tagBuf.AsMemory(0, TagSize), ct);
-            await _inner.WriteAsync(_ciphertextBuf.AsMemory(0, _bufferPos), ct);
+            await inner.WriteAsync(_headerBuf.AsMemory(0, 4), ct);
+            await inner.WriteAsync(_tagBuf.AsMemory(0, TagSize), ct);
+            await inner.WriteAsync(_ciphertextBuf.AsMemory(0, _bufferPos), ct);
 
             _bufferPos = 0;
             _chunkIndex++;
@@ -198,7 +189,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
             {
                 _disposed = true;
                 EncryptAndWriteChunk();
-                _inner.Flush();
+                inner.Flush();
                 _aes.Dispose();
             }
             base.Dispose(disposing);
@@ -210,7 +201,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
             {
                 _disposed = true;
                 await EncryptAndWriteChunkAsync(CancellationToken.None);
-                await _inner.FlushAsync();
+                await inner.FlushAsync();
                 _aes.Dispose();
             }
             GC.SuppressFinalize(this);
@@ -222,11 +213,9 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
     /// Validates chunk length headers to prevent memory bombs.
     /// Supports both sync and async I/O on the underlying stream.
     /// </summary>
-    private sealed class AesGcmDecryptStream : Stream
+    private sealed class AesGcmDecryptStream(Stream inner, byte[] key, byte[] baseNonce) : Stream
     {
-        private readonly Stream _inner;
-        private readonly AesGcm _aes;
-        private readonly byte[] _baseNonce;
+        private readonly AesGcm _aes = new(key, TagSize);
         private readonly byte[] _headerBuf = new byte[4];
         private readonly byte[] _tagBuf = new byte[TagSize];
         private readonly byte[] _ciphertextBuf = new byte[ChunkSize];
@@ -237,13 +226,6 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         private long _chunkIndex;
         private bool _eof;
         private bool _disposed;
-
-        public AesGcmDecryptStream(Stream inner, byte[] key, byte[] baseNonce)
-        {
-            _inner = inner;
-            _aes = new AesGcm(key, TagSize);
-            _baseNonce = baseNonce;
-        }
 
         public override bool CanRead => true;
         public override bool CanWrite => false;
@@ -257,7 +239,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
 
         private void DeriveChunkNonce()
         {
-            Buffer.BlockCopy(_baseNonce, 0, _nonceBuf, 0, NonceSize);
+            Buffer.BlockCopy(baseNonce, 0, _nonceBuf, 0, NonceSize);
             Span<byte> counter = stackalloc byte[8];
             BinaryPrimitives.WriteInt64LittleEndian(counter, _chunkIndex);
             for (var i = 0; i < Math.Min(counter.Length, NonceSize); i++)
@@ -266,7 +248,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
 
         private bool ReadNextChunk()
         {
-            if (ReadExact(_inner, _headerBuf, 4) < 4) { _eof = true; return false; }
+            if (ReadExact(inner, _headerBuf, 4) < 4) { _eof = true; return false; }
             var plainLen = BinaryPrimitives.ReadInt32LittleEndian(_headerBuf);
 
             if (plainLen <= 0 || plainLen > ChunkSize)
@@ -274,8 +256,8 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
                 throw new InvalidDataException($"Invalid chunk length {plainLen}; max allowed is {ChunkSize}.");
             }
 
-            if (ReadExact(_inner, _tagBuf, TagSize) < TagSize) { _eof = true; return false; }
-            if (ReadExact(_inner, _ciphertextBuf, plainLen) < plainLen) { _eof = true; return false; }
+            if (ReadExact(inner, _tagBuf, TagSize) < TagSize) { _eof = true; return false; }
+            if (ReadExact(inner, _ciphertextBuf, plainLen) < plainLen) { _eof = true; return false; }
 
             DeriveChunkNonce();
             _aes.Decrypt(
@@ -291,7 +273,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
 
         private async Task<bool> ReadNextChunkAsync(CancellationToken ct)
         {
-            if (await ReadExactAsync(_inner, _headerBuf, 4, ct) < 4) { _eof = true; return false; }
+            if (await ReadExactAsync(inner, _headerBuf, 4, ct) < 4) { _eof = true; return false; }
             var plainLen = BinaryPrimitives.ReadInt32LittleEndian(_headerBuf);
 
             if (plainLen <= 0 || plainLen > ChunkSize)
@@ -299,8 +281,8 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
                 throw new InvalidDataException($"Invalid chunk length {plainLen}; max allowed is {ChunkSize}.");
             }
 
-            if (await ReadExactAsync(_inner, _tagBuf, TagSize, ct) < TagSize) { _eof = true; return false; }
-            if (await ReadExactAsync(_inner, _ciphertextBuf, plainLen, ct) < plainLen) { _eof = true; return false; }
+            if (await ReadExactAsync(inner, _tagBuf, TagSize, ct) < TagSize) { _eof = true; return false; }
+            if (await ReadExactAsync(inner, _ciphertextBuf, plainLen, ct) < plainLen) { _eof = true; return false; }
 
             DeriveChunkNonce();
             _aes.Decrypt(
@@ -423,7 +405,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
             {
                 _disposed = true;
                 _aes.Dispose();
-                _inner.Dispose();
+                inner.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -434,7 +416,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
             {
                 _disposed = true;
                 _aes.Dispose();
-                await _inner.DisposeAsync();
+                await inner.DisposeAsync();
             }
             GC.SuppressFinalize(this);
         }

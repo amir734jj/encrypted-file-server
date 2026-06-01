@@ -19,7 +19,13 @@ namespace Api.Sftp;
 /// Implements the SFTP binary protocol (v3) over an SSH channel.
 /// Virtual filesystem: / → DataSource dirs → encrypted files (served decrypted).
 /// </summary>
-public sealed class SftpSubsystem : IDisposable
+public sealed class SftpSubsystem(
+    SessionChannel channel,
+    IServiceScope scope,
+    Guid? userId,
+    ILogger logger,
+    Action? onDisposed = null)
+    : IDisposable
 {
     // SFTP packet types
     private const byte SSH_FXP_INIT = 1, SSH_FXP_VERSION = 2;
@@ -64,19 +70,14 @@ public sealed class SftpSubsystem : IDisposable
     private sealed record VfsEntry(string Name, bool IsDir, long Size, DateTimeOffset Modified);
 
     // State
-    private readonly SessionChannel _channel;
-    private readonly IServiceScope _scope;
-    private readonly Guid? _userId;
-    private readonly ILogger _logger;
-    private readonly AppDbContext _db;
-    private readonly IFileStorageService _fileStorage;
-    private readonly IEncryptionProviderFactory _encryptionFactory;
-    private readonly IBackendStorageProviderFactory _backendStorageFactory;
+    private readonly AppDbContext _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    private readonly IFileStorageService _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
+    private readonly IEncryptionProviderFactory _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
+    private readonly IBackendStorageProviderFactory _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
     private readonly Dictionary<string, object> _handles = new();
     private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
-    private readonly Action? _onDisposed;
     private List<DataSource>? _cachedDataSources;
     private int _handleCounter;
     private int _bufferLen;
@@ -84,23 +85,10 @@ public sealed class SftpSubsystem : IDisposable
     private Task? _processTask;
     private int _disposed;
 
-    public SftpSubsystem(SessionChannel channel, IServiceScope scope, Guid? userId, ILogger logger, Action? onDisposed = null)
-    {
-        _channel = channel;
-        _scope = scope;
-        _userId = userId;
-        _logger = logger;
-        _onDisposed = onDisposed;
-        _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
-        _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
-        _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
-    }
-
     public void Start()
     {
-        _channel.DataReceived += OnData;
-        _channel.CloseReceived += OnClose;
+        channel.DataReceived += OnData;
+        channel.CloseReceived += OnClose;
         _processTask = Task.Run(() => ProcessLoopAsync(_cts.Token));
     }
 
@@ -127,7 +115,7 @@ public sealed class SftpSubsystem : IDisposable
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Error processing SFTP packet type {Type}", type);
+                        logger.LogError(ex, "Error processing SFTP packet type {Type}", type);
                     }
                 }
             }
@@ -135,7 +123,7 @@ public sealed class SftpSubsystem : IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "SFTP process loop error");
+            logger.LogError(ex, "SFTP process loop error");
         }
         finally
         {
@@ -187,7 +175,7 @@ public sealed class SftpSubsystem : IDisposable
         return true;
     }
 
-    private void Send(byte[] packet) => _channel.SendData(packet);
+    private void Send(byte[] packet) => channel.SendData(packet);
 
     #endregion
 
@@ -223,7 +211,7 @@ public sealed class SftpSubsystem : IDisposable
             case SSH_FXP_SETSTAT:
             case SSH_FXP_FSETSTAT: SendStatus(requestId, SSH_FX_OK); break;
             default:
-                _logger.LogDebug("Unsupported SFTP packet type {Type}", type);
+                logger.LogDebug("Unsupported SFTP packet type {Type}", type);
                 SendStatus(requestId, SSH_FX_OP_UNSUPPORTED);
                 break;
         }
@@ -408,7 +396,7 @@ public sealed class SftpSubsystem : IDisposable
                 }
             }
 
-            var ctx = await _fileStorage.OpenWriteStreamAsync(_userId!.Value, ds.Id, subPath, null);
+            var ctx = await _fileStorage.OpenWriteStreamAsync(userId!.Value, ds.Id, subPath, null);
             var handle = NextHandle();
             _handles[handle] = new WriteHandle(ctx);
             Send(BuildHandlePacket(id, handle));
@@ -500,7 +488,7 @@ public sealed class SftpSubsystem : IDisposable
 
         if ((long)offset != wh.Position)
         {
-            _logger.LogWarning("SFTP non-sequential write at offset {Offset}, expected {Expected}", offset, wh.Position);
+            logger.LogWarning("SFTP non-sequential write at offset {Offset}, expected {Expected}", offset, wh.Position);
             SendStatus(id, SSH_FX_FAILURE);
             return;
         }
@@ -531,7 +519,7 @@ public sealed class SftpSubsystem : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to store file via SFTP");
+                    logger.LogError(ex, "Failed to store file via SFTP");
                     await wh.Context.DisposeAsync();
                     SendStatus(id, SSH_FX_FAILURE);
                     return;
@@ -613,7 +601,7 @@ public sealed class SftpSubsystem : IDisposable
 
     #region Virtual filesystem helpers
 
-    private bool IsAuthenticated => _userId.HasValue;
+    private bool IsAuthenticated => userId.HasValue;
 
     private void InvalidateCache() => _cachedDataSources = null;
 
@@ -624,11 +612,11 @@ public sealed class SftpSubsystem : IDisposable
             return _cachedDataSources;
         }
 
-        if (_userId.HasValue)
+        if (userId.HasValue)
         {
             _cachedDataSources = await _db.DataSources
                 .Include(d => d.Frontends)
-                .Where(d => d.UserId == _userId && d.Frontends.Any(f => f.Type == FrontendType.Sftp))
+                .Where(d => d.UserId == userId && d.Frontends.Any(f => f.Type == FrontendType.Sftp))
                 .OrderBy(d => d.Name).ToListAsync();
         }
         else
@@ -925,32 +913,29 @@ public sealed class SftpSubsystem : IDisposable
         }
         _handles.Clear();
 
-        _scope.Dispose();
+        scope.Dispose();
         _cts.Dispose();
-        _onDisposed?.Invoke();
+        onDisposed?.Invoke();
     }
 
     #endregion
 
     #region Binary reader/writer
 
-    private sealed class SftpReader
+    private sealed class SftpReader(byte[] data)
     {
-        private readonly byte[] _data;
-        private int _pos;
-
-        public SftpReader(byte[] data) { _data = data; _pos = 0; }
+        private int _pos = 0;
 
         public uint ReadUInt32()
         {
-            var val = BinaryPrimitives.ReadUInt32BigEndian(_data.AsSpan(_pos, 4));
+            var val = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(_pos, 4));
             _pos += 4;
             return val;
         }
 
         public ulong ReadUInt64()
         {
-            var val = BinaryPrimitives.ReadUInt64BigEndian(_data.AsSpan(_pos, 8));
+            var val = BinaryPrimitives.ReadUInt64BigEndian(data.AsSpan(_pos, 8));
             _pos += 8;
             return val;
         }
@@ -958,7 +943,7 @@ public sealed class SftpSubsystem : IDisposable
         public string ReadString()
         {
             var len = (int)ReadUInt32();
-            var s = Encoding.UTF8.GetString(_data, _pos, len);
+            var s = Encoding.UTF8.GetString(data, _pos, len);
             _pos += len;
             return s;
         }
@@ -967,14 +952,14 @@ public sealed class SftpSubsystem : IDisposable
         {
             var len = (int)ReadUInt32();
             var result = new byte[len];
-            Buffer.BlockCopy(_data, _pos, result, 0, len);
+            Buffer.BlockCopy(data, _pos, result, 0, len);
             _pos += len;
             return result;
         }
 
         public void SkipAttrs()
         {
-            if (_pos >= _data.Length)
+            if (_pos >= data.Length)
             {
                 return;
             }
