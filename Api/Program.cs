@@ -232,29 +232,79 @@ foreach (var frontend in frontends)
     }
 }
 
+// Diagnostic: direct FTP server state
+app.MapGet("/api/diagnostics/ftp-state", (IServiceProvider sp) =>
+{
+    var ftpServer = sp.GetService<FubarDev.FtpServer.IFtpServer>();
+    var ftpHost = sp.GetService<FubarDev.FtpServer.IFtpServerHost>();
+    return Results.Ok(new
+    {
+        ftpServerType = ftpServer?.GetType().FullName,
+        ftpServerStatus = ftpServer?.Status.ToString(),
+        ftpServerReady = ftpServer?.Ready,
+        ftpHostType = ftpHost?.GetType().FullName,
+    });
+}).AllowAnonymous();
+
 // Diagnostic endpoint to check frontend server status
 app.MapGet("/api/diagnostics/frontends", (IEnumerable<IFrontendDataSource> fds) =>
     fds.Select(f => new { f.SourceKey, f.DisplayName, f.IsRunning })).AllowAnonymous();
 
-// Diagnostic: check if FTP port is listening
+// Diagnostic: check if FTP port is listening (with proper timeouts)
 app.MapGet("/api/diagnostics/ftp-check", async () =>
 {
     var port = app.Configuration.GetValue("Ftp:Port", 2121);
+    var results = new Dictionary<string, object> { ["port"] = port };
+
+    // Step 1: TCP connect with timeout
     try
     {
+        using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         using var client = new System.Net.Sockets.TcpClient();
-        await client.ConnectAsync(System.Net.IPAddress.Loopback, port);
-        var stream = client.GetStream();
-        stream.ReadTimeout = 3000;
-        var buffer = new byte[256];
-        var bytesRead = await stream.ReadAsync(buffer);
-        var banner = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead);
-        return Results.Ok(new { port, listening = true, banner });
+        await client.ConnectAsync(System.Net.IPAddress.Loopback, port, connectCts.Token);
+        results["tcpConnect"] = "success";
+
+        // Step 2: Read banner with timeout
+        try
+        {
+            using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var stream = client.GetStream();
+            var buffer = new byte[512];
+            var bytesRead = await stream.ReadAsync(buffer, readCts.Token);
+            results["banner"] = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead);
+        }
+        catch (OperationCanceledException)
+        {
+            results["banner"] = "TIMEOUT - connected but no banner within 3s";
+        }
+        catch (Exception ex)
+        {
+            results["bannerError"] = ex.GetType().Name + ": " + ex.Message;
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        results["tcpConnect"] = "TIMEOUT - could not connect within 3s";
     }
     catch (Exception ex)
     {
-        return Results.Ok(new { port, listening = false, error = ex.Message });
+        results["tcpConnect"] = "FAILED: " + ex.GetType().Name + ": " + ex.Message;
     }
+
+    // Step 3: Check if port is bound (try binding to 0.0.0.0)
+    try
+    {
+        var test = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, port);
+        test.Start();
+        test.Stop();
+        results["portBound"] = false; // nothing is using the port!
+    }
+    catch
+    {
+        results["portBound"] = true; // something IS using the port
+    }
+
+    return Results.Ok(results);
 }).AllowAnonymous();
 
 app.MapStaticAssets();
