@@ -11,6 +11,9 @@ public class GlobalConfigModel
     [GlobalConfigCol(Name = "FTP_PASSIVE_PORT_MAX")]
     public int FtpPassivePortMax { get; set; } = 50100;
 
+    [GlobalConfigCol(Name = "SFTP_PORT")]
+    public int SftpPort { get; set; } = 2222;
+
     [GlobalConfigCol(Name = "MAX_UPLOAD_SIZE_MB")]
     public int MaxUploadSizeMb { get; set; } = 500;
 }

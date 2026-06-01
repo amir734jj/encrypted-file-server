@@ -32,6 +32,10 @@ else if (_config is not null)
                             <HxInputNumber @bind-Value="_config.FtpPassivePortMax" Label="Passive Port Max"
                                            Hint="End of the port range. Must be open in your firewall/Docker." />
                         </div>
+                        <div class="mb-3">
+                            <HxInputNumber @bind-Value="_config.SftpPort" Label="SFTP Port"
+                                           Hint="The port the built-in SFTP server listens on." />
+                        </div>
                     </div>
                 </div>
             </div>
