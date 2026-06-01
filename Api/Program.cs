@@ -234,7 +234,28 @@ foreach (var frontend in frontends)
 
 // Diagnostic endpoint to check frontend server status
 app.MapGet("/api/diagnostics/frontends", (IEnumerable<IFrontendDataSource> fds) =>
-    fds.Select(f => new { f.SourceKey, f.DisplayName, f.IsRunning }));
+    fds.Select(f => new { f.SourceKey, f.DisplayName, f.IsRunning })).AllowAnonymous();
+
+// Diagnostic: check if FTP port is listening
+app.MapGet("/api/diagnostics/ftp-check", async () =>
+{
+    var port = app.Configuration.GetValue("Ftp:Port", 2121);
+    try
+    {
+        using var client = new System.Net.Sockets.TcpClient();
+        await client.ConnectAsync(System.Net.IPAddress.Loopback, port);
+        var stream = client.GetStream();
+        stream.ReadTimeout = 3000;
+        var buffer = new byte[256];
+        var bytesRead = await stream.ReadAsync(buffer);
+        var banner = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead);
+        return Results.Ok(new { port, listening = true, banner });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { port, listening = false, error = ex.Message });
+    }
+}).AllowAnonymous();
 
 app.MapStaticAssets();
 
