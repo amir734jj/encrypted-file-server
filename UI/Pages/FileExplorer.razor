@@ -48,7 +48,7 @@
         <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="ShowNewFolderPrompt">
             <i class="bi bi-folder-plus me-1"></i> New Folder
         </HxButton>
-        <InputFile OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
+        <InputFile @key="_uploadInputKey" OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
         <label for="fileUpload" class="btn btn-primary btn-sm">
             <i class="bi bi-upload me-1"></i> Upload Files
         </label>
@@ -173,6 +173,7 @@ else
     private int _uploadCurrent;
     private int _uploadTotal;
     private string _uploadFileName = string.Empty;
+    private int _uploadInputKey;
     private HxModal _newFolderModal = null!;
     private string _newFolderName = string.Empty;
 
@@ -251,6 +252,7 @@ else
         }
 
         _uploading = false;
+        _uploadInputKey++;
         await LoadAsync();
         StateHasChanged();
         Messenger.AddInformation($"Uploaded {_uploadTotal} file(s).");
