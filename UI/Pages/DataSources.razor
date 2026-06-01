@@ -54,10 +54,7 @@ else
                             <span class="badge @badgeClass me-1 mt-1">@fe.Type @(fe.AllowAnonymous ? "(anon)" : "")</span>
                         }
                         <span class="badge bg-secondary me-1 mt-1">@ds.Backend.EncryptionMethod</span>
-                        @{
-                            var httpFe = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
-                        }
-                        @if (httpFe is { AllowAnonymous: true })
+                        @if (ds.Frontends.Any(f => f.Type == FrontendType.Http))
                         {
                             <br />
                             <small class="text-muted">
