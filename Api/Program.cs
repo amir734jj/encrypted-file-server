@@ -221,9 +221,20 @@ using (var configScope = app.Services.CreateScope())
 var frontends = app.Services.GetServices<IFrontendDataSource>();
 foreach (var frontend in frontends)
 {
-    await frontend.StartAsync(CancellationToken.None);
-    Log.Information("Frontend data source started: {Source}", frontend.DisplayName);
+    try
+    {
+        await frontend.StartAsync(CancellationToken.None);
+        Log.Information("Frontend data source started: {Source}", frontend.DisplayName);
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Failed to start frontend: {Source}", frontend.DisplayName);
+    }
 }
+
+// Diagnostic endpoint to check frontend server status
+app.MapGet("/api/diagnostics/frontends", (IEnumerable<IFrontendDataSource> fds) =>
+    fds.Select(f => new { f.SourceKey, f.DisplayName, f.IsRunning }));
 
 app.MapStaticAssets();
 
