@@ -233,20 +233,31 @@ public sealed class BrowseController(
         sb.AppendLine($"<title>{HttpUtility.HtmlEncode(title)}</title>");
         sb.AppendLine("<meta charset=\"utf-8\">");
         sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+        sb.AppendLine("<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">");
+        sb.AppendLine("<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>");
+        sb.AppendLine("<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap\" rel=\"stylesheet\">");
         sb.AppendLine("<style>");
-        sb.AppendLine("body { font-family: monospace; margin: 2em; background: #1a1a2e; color: #e0e0e0; }");
-        sb.AppendLine("h1 { font-size: 1.4em; color: #00d4ff; border-bottom: 1px solid #333; padding-bottom: 0.5em; }");
+        sb.AppendLine(":root { --bg: #1a1a2e; --bg-hover: #16213e; --text: #e0e0e0; --heading: #00d4ff; --link: #00d4ff; --muted: #888; --dim: #666; --border: #333; }");
+        sb.AppendLine("[data-theme='light'] { --bg: #f5f5f5; --bg-hover: #e8e8e8; --text: #1a1a1a; --heading: #0066cc; --link: #0066cc; --muted: #666; --dim: #999; --border: #ddd; }");
+        sb.AppendLine("body { font-family: 'JetBrains Mono', monospace; margin: 2em; background: var(--bg); color: var(--text); transition: background 0.2s, color 0.2s; }");
+        sb.AppendLine("h1 { font-size: 1.4em; color: var(--heading); border-bottom: 1px solid var(--border); padding-bottom: 0.5em; }");
         sb.AppendLine("table { border-collapse: collapse; width: 100%; }");
         sb.AppendLine("th, td { text-align: left; padding: 4px 12px; }");
-        sb.AppendLine("th { color: #888; font-weight: normal; border-bottom: 1px solid #333; }");
-        sb.AppendLine("tr:hover { background: #16213e; }");
-        sb.AppendLine("a { color: #00d4ff; text-decoration: none; }");
+        sb.AppendLine("th { color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--border); }");
+        sb.AppendLine("tr:hover { background: var(--bg-hover); }");
+        sb.AppendLine("a { color: var(--link); text-decoration: none; }");
         sb.AppendLine("a:hover { text-decoration: underline; }");
-        sb.AppendLine(".size { color: #888; text-align: right; }");
-        sb.AppendLine(".date { color: #666; }");
+        sb.AppendLine(".size { color: var(--muted); text-align: right; }");
+        sb.AppendLine(".date { color: var(--dim); }");
+        sb.AppendLine(".header { display: flex; justify-content: space-between; align-items: center; }");
+        sb.AppendLine(".theme-btn { background: none; border: 1px solid var(--border); color: var(--text); cursor: pointer; padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 0.85em; }");
+        sb.AppendLine(".theme-btn:hover { background: var(--bg-hover); }");
         sb.AppendLine("</style>");
         sb.AppendLine("</head><body>");
+        sb.AppendLine("<div class=\"header\">");
         sb.AppendLine($"<h1>Index of {HttpUtility.HtmlEncode(currentPath)}</h1>");
+        sb.AppendLine("<button class=\"theme-btn\" onclick=\"toggleTheme()\" id=\"themeBtn\">☀️ Light</button>");
+        sb.AppendLine("</div>");
         sb.AppendLine("<table>");
         sb.AppendLine("<tr><th>Name</th><th class=\"size\">Size</th><th class=\"date\">Modified</th></tr>");
 
@@ -265,6 +276,24 @@ public sealed class BrowseController(
         }
 
         sb.AppendLine("</table>");
+        sb.AppendLine("<script>");
+        sb.AppendLine("function toggleTheme() {");
+        sb.AppendLine("  var html = document.documentElement;");
+        sb.AppendLine("  var current = html.getAttribute('data-theme');");
+        sb.AppendLine("  var next = current === 'light' ? 'dark' : 'light';");
+        sb.AppendLine("  html.setAttribute('data-theme', next);");
+        sb.AppendLine("  localStorage.setItem('browse-theme', next);");
+        sb.AppendLine("  updateBtn(next);");
+        sb.AppendLine("}");
+        sb.AppendLine("function updateBtn(t) {");
+        sb.AppendLine("  document.getElementById('themeBtn').textContent = t === 'light' ? '\\u{1F319} Dark' : '\\u{2600}\\u{FE0F} Light';");
+        sb.AppendLine("}");
+        sb.AppendLine("(function() {");
+        sb.AppendLine("  var saved = localStorage.getItem('browse-theme') || 'dark';");
+        sb.AppendLine("  document.documentElement.setAttribute('data-theme', saved);");
+        sb.AppendLine("  updateBtn(saved);");
+        sb.AppendLine("})();");
+        sb.AppendLine("</script>");
         sb.AppendLine("</body></html>");
         return sb.ToString();
     }
