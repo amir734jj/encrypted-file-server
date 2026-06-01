@@ -4,6 +4,7 @@ using Api.Interfaces;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
 using Shared.Contracts;
 using Shared.Interfaces;
 using Shared.Models;
@@ -153,6 +154,11 @@ public sealed class FilesController(
         var contentType = file.ContentType is not null
             ? encryption.DecryptString(file.ContentType, masterKey, iv)
             : "application/octet-stream";
+        if (contentType == "application/octet-stream")
+        {
+            if (new FileExtensionContentTypeProvider().TryGetContentType(fileName, out var inferred))
+                contentType = inferred;
+        }
 
         return File(stream, contentType, fileName);
     }

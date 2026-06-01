@@ -7,6 +7,7 @@ using Api.ViewModels;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
 using Shared.Interfaces;
 using Shared.Models;
 
@@ -23,6 +24,7 @@ public sealed class BrowseController(
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private IBasicCrud<AccessTicket> TicketDal => repository.For<AccessTicket>();
+    private static readonly FileExtensionContentTypeProvider MimeMap = new();
 
     [HttpGet]
     public async Task<IActionResult> ListUsers()
@@ -100,6 +102,11 @@ public sealed class BrowseController(
                 var contentType = file.ContentType is not null
                     ? fileEncryption.DecryptString(file.ContentType, masterKey!, iv)
                     : "application/octet-stream";
+                if (contentType == "application/octet-stream" &&
+                    MimeMap.TryGetContentType(fileName, out var inferred))
+                {
+                    contentType = inferred;
+                }
                 var stream = await fileStorage.OpenDecryptedStreamAsync(file);
 
                 // For streamable media (video/audio), Chrome requires Range request support

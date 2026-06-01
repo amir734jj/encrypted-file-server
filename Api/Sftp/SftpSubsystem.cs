@@ -8,6 +8,7 @@ using Api.Interfaces;
 using Api.Services.Backend;
 using FxSsh;
 using FxSsh.Services;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
 using Shared.Models;
@@ -396,7 +397,8 @@ public sealed class SftpSubsystem(
                 }
             }
 
-            var ctx = await _fileStorage.OpenWriteStreamAsync(userId!.Value, ds.Id, subPath, null);
+            var mime = new FileExtensionContentTypeProvider().TryGetContentType(subPath, out var ct) ? ct : null;
+            var ctx = await _fileStorage.OpenWriteStreamAsync(userId!.Value, ds.Id, subPath, mime);
             var handle = NextHandle();
             _handles[handle] = new WriteHandle(ctx);
             Send(BuildHandlePacket(id, handle));

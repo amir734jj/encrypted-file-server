@@ -5,6 +5,7 @@ using Api.Interfaces;
 using Api.Services.Backend;
 using FubarDev.FtpServer.BackgroundTransfer;
 using FubarDev.FtpServer.FileSystem;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
 using Shared.Models;
@@ -233,7 +234,8 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         }
 
         var fullPath = (vde.VirtualPath ?? "") + fileName;
-        await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, null, data);
+        var mime = InferContentType(fileName);
+        await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, mime, data);
         return null;
     }
 
@@ -256,7 +258,8 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         var encryption = await GetEncryptionForDataSourceAsync(dsId);
         var fullPath = DecryptFileName(vfe.EncryptedFile, masterKey, encryption);
         await _fileStorage.DeleteFileAsync(vfe.EncryptedFile);
-        await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, null, data);
+        var mime = InferContentType(fullPath);
+        await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, mime, data);
         return null;
     }
 
@@ -432,6 +435,11 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         DateTimeOffset? modify, DateTimeOffset? access, DateTimeOffset? create, CancellationToken ct)
     {
         return Task.FromResult(entry);
+    }
+
+    private static string? InferContentType(string fileName)
+    {
+        return new FileExtensionContentTypeProvider().TryGetContentType(fileName, out var ct) ? ct : null;
     }
 
     public void Dispose()
