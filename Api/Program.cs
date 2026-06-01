@@ -149,6 +149,10 @@ builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
     opt.ServerAddress = "0.0.0.0";
     opt.Port = builder.Configuration.GetValue("Ftp:Port", 2121);
 });
+builder.Services.Configure<FubarDev.FtpServer.FtpConnectionOptions>(opt =>
+{
+    opt.InactivityTimeout = TimeSpan.FromMinutes(30);
+});
 builder.Services.Configure<FubarDev.FtpServer.AuthTlsOptions>(opt =>
 {
     opt.ServerCertificate = LoadOrGenerateFtpCertificate();
