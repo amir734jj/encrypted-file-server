@@ -348,6 +348,10 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                         await _fileStorage.DeleteFileAsync(f);
                     }
                 }
+
+                // Remove this directory and any children from session tracking
+                _sessionDirs.RemoveWhere(e => e.dsId == dsId &&
+                    e.virtualPath.StartsWith(vde.VirtualPath, StringComparison.OrdinalIgnoreCase));
             }
         }
     }
