@@ -101,6 +101,24 @@ public sealed class BrowseController(
                     ? fileEncryption.DecryptString(file.ContentType, masterKey!, iv)
                     : "application/octet-stream";
                 var stream = await fileStorage.OpenDecryptedStreamAsync(file);
+
+                // For streamable media (video/audio), Chrome requires Range request support
+                // which needs a seekable stream. Buffer to a temp file so ASP.NET can handle ranges.
+                if (contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ||
+                    contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+                {
+                    var tempPath = Path.GetTempFileName();
+                    var tempStream = new FileStream(tempPath, FileMode.Create, FileAccess.ReadWrite,
+                        FileShare.None, 81920, FileOptions.DeleteOnClose);
+                    await using (stream)
+                    {
+                        await stream.CopyToAsync(tempStream);
+                    }
+                    tempStream.Position = 0;
+                    Response.Headers.ContentDisposition = $"inline; filename=\"{fileName}\"";
+                    return File(tempStream, contentType, enableRangeProcessing: true);
+                }
+
                 Response.Headers.ContentDisposition = $"inline; filename=\"{fileName}\"";
                 return File(stream, contentType);
             }
