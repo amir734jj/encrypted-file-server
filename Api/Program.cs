@@ -151,7 +151,7 @@ builder.Services.AddSingleton<IPasvAddressResolver>(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
     var minPort = config.GetValue("Ftp:PasvMinPort", 50000);
-    var maxPort = config.GetValue("Ftp:PasvMaxPort", 50100);
+    var maxPort = config.GetValue("Ftp:PasvMaxPort", 50004);
     System.Net.IPAddress? publicIp = null;
     var publicAddress = config["Ftp:PublicAddress"];
     if (string.IsNullOrEmpty(publicAddress))
