@@ -1,0 +1,95 @@
+@page "/"
+@inject ApiService Api
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+@if (!Auth.IsAuthenticated)
+{
+    Nav.NavigateTo("/login");
+    return;
+}
+
+<h3 class="mb-4"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h3>
+
+@if (_dataSources is null)
+{
+    <div class="d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        Loading...
+    </div>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-md-4">
+            <div class="card text-bg-primary">
+                <div class="card-body">
+                    <h5 class="card-title"><i class="bi bi-database me-2"></i>Data Sources</h5>
+                    <h2>@_dataSources.Count</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-bg-success">
+                <div class="card-body">
+                    <h5 class="card-title"><i class="bi bi-file-earmark-lock me-2"></i>Encrypted Files</h5>
+                    <h2>@_dataSources.Sum(d => d.FileCount)</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-bg-info">
+                <div class="card-body">
+                    <h5 class="card-title"><i class="bi bi-hdd me-2"></i>Total Size</h5>
+                    <h2>@FormatBytes(_dataSources.Sum(d => d.TotalFileSize))</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-header">
+            <i class="bi bi-info-circle me-2"></i>Quick Start
+        </div>
+        <div class="card-body">
+            <ol>
+                <li>Create a <strong>Data Source</strong> (acts as a folder for your encrypted files)</li>
+                <li>Upload files via the <strong>web UI</strong> or connect with an <strong>FTP client</strong></li>
+                <li>FTP connection: <code>ftp://your-email@@server-host:2121</code></li>
+                <li>Files are encrypted at rest with your unique master key (AES-256-CBC)</li>
+                <li>Downloads are <strong>streamed and decrypted on-the-fly</strong> — no temp files on disk</li>
+            </ol>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DataSourceDto>? _dataSources;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAuthenticated) return;
+
+        try
+        {
+            _dataSources = await Api.GetDataSourcesAsync();
+        }
+        catch
+        {
+            _dataSources = [];
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

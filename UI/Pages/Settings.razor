@@ -1,0 +1,116 @@
+@page "/settings"
+@inject ApiService Api
+@inject IHxMessengerService Messenger
+
+<PageTitle>Settings</PageTitle>
+
+<h3 class="mb-4"><i class="bi bi-gear me-2"></i>Global Configuration</h3>
+
+@if (_loading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border" role="status"></div>
+    </div>
+}
+else if (_config is not null)
+{
+    <EditForm Model="_config" OnValidSubmit="SaveAsync">
+        <div class="row g-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><i class="bi bi-hdd-network me-2"></i>FTP Server</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <HxInputNumber @bind-Value="_config.FtpPort" Label="FTP Port" />
+                        </div>
+                        <div class="mb-3">
+                            <HxInputNumber @bind-Value="_config.FtpPassivePortMin" Label="Passive Port Min" />
+                        </div>
+                        <div class="mb-3">
+                            <HxInputNumber @bind-Value="_config.FtpPassivePortMax" Label="Passive Port Max" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><i class="bi bi-cloud-upload me-2"></i>Storage</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <HxInputText @bind-Value="_config.StorageBasePath" Label="Storage Base Path" />
+                        </div>
+                        <div class="mb-3">
+                            <HxInputNumber @bind-Value="_config.MaxUploadSizeMb" Label="Max Upload Size (MB)" />
+                        </div>
+                        <div class="mb-3">
+                            <HxInputText @bind-Value="_config.EncryptionAlgorithm" Label="Encryption Algorithm" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><i class="bi bi-person-check me-2"></i>Registration</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <HxSwitch @bind-Value="_config.AllowRegistration" Text="Allow Registration" />
+                        </div>
+                        <div class="mb-3">
+                            <HxSwitch @bind-Value="_config.AutoActivateUsers" Text="Auto Activate Users" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-4">
+            <HxSubmit Color="ThemeColor.Primary" Enabled="!_saving">
+                <i class="bi bi-check-lg me-1"></i>Save Settings
+            </HxSubmit>
+        </div>
+    </EditForm>
+}
+
+@code {
+    private GlobalConfigModel? _config;
+    private bool _loading = true;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _config = await Api.GetGlobalConfigAsync();
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError("Failed to load settings: " + ex.Message);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_config is null) return;
+        _saving = true;
+
+        try
+        {
+            await Api.SaveGlobalConfigAsync(_config);
+            Messenger.AddInformation("Settings saved successfully.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError("Failed to save settings: " + ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

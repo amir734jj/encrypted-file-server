@@ -1,0 +1,32 @@
+@inject AuthService Auth
+
+<div class="sidebar bg-dark text-white d-flex flex-column p-3">
+    <h5 class="mb-4">
+        <i class="bi bi-shield-lock me-2"></i>Encrypted FS
+    </h5>
+
+    <nav class="nav flex-column">
+        <a class="nav-link text-white" href="/">
+            <i class="bi bi-house-door me-2"></i>Dashboard
+        </a>
+        <a class="nav-link text-white" href="/datasources">
+            <i class="bi bi-database me-2"></i>Data Sources
+        </a>
+
+        @if (Auth.IsAdmin)
+        {
+            <hr class="border-secondary" />
+            <span class="text-secondary small mb-2">Administration</span>
+            <a class="nav-link text-white" href="/users">
+                <i class="bi bi-people me-2"></i>Users
+            </a>
+            <a class="nav-link text-white" href="/settings">
+                <i class="bi bi-gear me-2"></i>Settings
+            </a>
+        }
+    </nav>
+
+    <div class="mt-auto text-secondary small">
+        <i class="bi bi-info-circle me-1"></i>FTP: port 2121
+    </div>
+</div>

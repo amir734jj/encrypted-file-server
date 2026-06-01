@@ -1,0 +1,12 @@
+**/bin
+**/obj
+**/.vs
+**/node_modules
+**/.git
+**/storage
+**/logs
+*.user
+*.suo
+.dockerignore
+Dockerfile
+README.md

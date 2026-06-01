@@ -1,0 +1,39 @@
+@inherits LayoutComponentBase
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<div class="d-flex">
+    @if (Auth.IsAuthenticated)
+    {
+        <NavMenu />
+    }
+    <div class="main-content">
+        @if (Auth.IsAuthenticated)
+        {
+            <nav class="navbar navbar-light bg-light border-bottom px-3">
+                <span class="navbar-text">
+                    <i class="bi bi-person-circle me-1"></i> Hello, @Auth.DisplayLabel
+                </span>
+                <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="Logout" Outline="true">
+                    <i class="bi bi-box-arrow-right me-1"></i> Logout
+                </HxButton>
+            </nav>
+        }
+        <div class="container-fluid p-4">
+            @Body
+        </div>
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Auth.AuthStateChanged += StateHasChanged;
+    }
+
+    private async Task Logout()
+    {
+        await Auth.ClearTokenAsync();
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+}

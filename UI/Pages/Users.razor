@@ -1,0 +1,129 @@
+@page "/users"
+@inject ApiService Api
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IHxMessengerService Messenger
+@inject IHxMessageBoxService MessageBox
+
+@if (!Auth.IsAuthenticated || !Auth.IsAdmin)
+{
+    Nav.NavigateTo("/");
+    return;
+}
+
+<h3 class="mb-4"><i class="bi bi-people me-2"></i>User Management</h3>
+
+@if (_users is null)
+{
+    <div class="d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        Loading...
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var user in _users)
+                {
+                    <tr>
+                        <td>@user.Email</td>
+                        <td>
+                            @foreach (var role in user.Roles)
+                            {
+                                <span class="badge @(role == "Admin" ? "bg-danger" : "bg-primary") me-1">@role</span>
+                            }
+                        </td>
+                        <td>
+                            @if (user.IsActive)
+                            {
+                                <span class="badge bg-success">Active</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning text-dark">Inactive</span>
+                            }
+                        </td>
+                        <td>@(user.LastLoginAt?.LocalDateTime.ToString("MMM dd, yyyy HH:mm") ?? "Never")</td>
+                        <td class="text-end">
+                            @if (user.Id != Auth.UserId)
+                            {
+                                @if (user.IsActive)
+                                {
+                                    <HxButton Size="ButtonSize.Small" Color="ThemeColor.Warning" Outline="true" OnClick="() => Deactivate(user)">
+                                        Deactivate
+                                    </HxButton>
+                                }
+                                else
+                                {
+                                    <HxButton Size="ButtonSize.Small" Color="ThemeColor.Success" Outline="true" OnClick="() => Activate(user)">
+                                        Activate
+                                    </HxButton>
+                                }
+                                <HxButton Size="ButtonSize.Small" Color="ThemeColor.Danger" Outline="true" OnClick="() => Delete(user)">
+                                    <i class="bi bi-trash"></i>
+                                </HxButton>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<UserDto>? _users;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _users = await Api.GetUsersAsync();
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to load users: {ex.Message}");
+        }
+    }
+
+    private async Task Activate(UserDto user)
+    {
+        await Api.ActivateUserAsync(user.Id);
+        await LoadAsync();
+        Messenger.AddInformation($"{user.Email} activated.");
+    }
+
+    private async Task Deactivate(UserDto user)
+    {
+        await Api.DeactivateUserAsync(user.Id);
+        await LoadAsync();
+        Messenger.AddInformation($"{user.Email} deactivated.");
+    }
+
+    private async Task Delete(UserDto user)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Delete user '{user.Email}'? This cannot be undone.");
+        if (!confirmed) return;
+
+        await Api.DeleteUserAsync(user.Id);
+        await LoadAsync();
+        Messenger.AddInformation($"{user.Email} deleted.");
+    }
+}

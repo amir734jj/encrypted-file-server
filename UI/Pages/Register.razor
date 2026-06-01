@@ -1,0 +1,76 @@
+@page "/register"
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject IHxMessengerService Messenger
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h4 class="card-title text-center mb-4">
+                    <i class="bi bi-person-plus me-2"></i>Register
+                </h4>
+
+                <EditForm Model="@_model" OnValidSubmit="HandleRegister">
+                    <div class="mb-3">
+                        <HxInputText Label="Email" @bind-Value="_model.Email" Type="InputType.Email" Placeholder="you@example.com" />
+                    </div>
+                    <div class="mb-3">
+                        <HxInputText Label="Password" @bind-Value="_model.Password" Type="InputType.Password" />
+                    </div>
+                    <div class="mb-3">
+                        <HxInputText Label="Confirm Password" @bind-Value="_model.PasswordConfirm" Type="InputType.Password" />
+                    </div>
+                    <HxSubmit Color="ThemeColor.Primary" CssClass="w-100" Enabled="@(!_loading)">
+                        @if (_loading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Register
+                    </HxSubmit>
+                </EditForm>
+
+                <hr />
+                <div class="text-center">
+                    <a href="/login">Already have an account? Login</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private RegisterModel _model = new();
+    private bool _loading;
+
+    private async Task HandleRegister()
+    {
+        _loading = true;
+        var (success, isActive, error) = await Api.RegisterAsync(_model.Email, _model.Password, _model.PasswordConfirm);
+        _loading = false;
+
+        if (!success)
+        {
+            Messenger.AddError(error ?? "Registration failed.");
+            return;
+        }
+
+        if (isActive)
+        {
+            Messenger.AddInformation("Account created! You are the first user and have been granted admin access. Please login.");
+        }
+        else
+        {
+            Messenger.AddInformation("Account created! Please wait for an administrator to activate your account.");
+        }
+
+        Nav.NavigateTo("/login");
+    }
+
+    private class RegisterModel
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string PasswordConfirm { get; set; } = string.Empty;
+    }
+}

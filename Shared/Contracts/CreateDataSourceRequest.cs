@@ -1,0 +1,18 @@
+namespace Shared.Contracts;
+
+public record CreateDataSourceRequest(
+    string Name,
+
+    // Backend FTP connection
+    string BackendFtpHost,
+    int BackendFtpPort = 21,
+    string BackendFtpUsername = "",
+    string BackendFtpPassword = "",
+    string BackendFtpBasePath = "/",
+    bool BackendFtpUseSsl = false,
+
+    // Frontend toggles
+    bool FrontendFtpEnabled = false,
+    bool FrontendFtpAllowAnonymous = false,
+    bool FrontendHttpEnabled = false,
+    bool FrontendHttpAllowAnonymous = false);

@@ -1,0 +1,183 @@
+@page "/files/{DataSourceId:guid}"
+@inject ApiService Api
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IHxMessengerService Messenger
+@inject IHxMessageBoxService MessageBox
+@inject IJSRuntime JS
+
+@if (!Auth.IsAuthenticated)
+{
+    Nav.NavigateTo("/login");
+    return;
+}
+
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/datasources">Data Sources</a></li>
+        <li class="breadcrumb-item active">Files</li>
+    </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3><i class="bi bi-file-earmark-lock me-2"></i>Files</h3>
+    <div>
+        <InputFile OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
+        <label for="fileUpload" class="btn btn-primary">
+            <i class="bi bi-upload me-1"></i> Upload Files
+        </label>
+    </div>
+</div>
+
+@if (_uploading)
+{
+    <div class="alert alert-info d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        Uploading & encrypting...
+    </div>
+}
+
+@if (_files is null)
+{
+    <div class="d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        Loading...
+    </div>
+}
+else if (_files.Count == 0)
+{
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle me-2"></i>No files yet. Upload files via the button above or use an FTP client.
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Type</th>
+                    <th>Uploaded</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var file in _files)
+                {
+                    <tr>
+                        <td>
+                            <i class="bi bi-file-earmark me-1 text-muted"></i>
+                            @file.FileName
+                        </td>
+                        <td>@FormatBytes(file.FileSize)</td>
+                        <td><span class="badge bg-secondary">@(file.ContentType ?? "unknown")</span></td>
+                        <td>@file.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy HH:mm")</td>
+                        <td class="text-end">
+                            <HxButton Color="ThemeColor.Success" Size="ButtonSize.Small" Outline="true" OnClick="() => DownloadFile(file)">
+                                <i class="bi bi-download"></i>
+                            </HxButton>
+                            <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteFile(file)">
+                                <i class="bi bi-trash"></i>
+                            </HxButton>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid DataSourceId { get; set; }
+
+    private List<FileEntryDto>? _files;
+    private bool _uploading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAuthenticated) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _files = await Api.GetFilesAsync(DataSourceId);
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to load files: {ex.Message}");
+            _files = [];
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        StateHasChanged();
+
+        foreach (var file in e.GetMultipleFiles(20))
+        {
+            try
+            {
+                await using var stream = file.OpenReadStream(maxAllowedSize: 500_000_000); // 500 MB
+                await Api.UploadFileAsync(DataSourceId, stream, file.Name, file.ContentType ?? "application/octet-stream");
+            }
+            catch (Exception ex)
+            {
+                Messenger.AddError($"Failed to upload {file.Name}: {ex.Message}");
+            }
+        }
+
+        _uploading = false;
+        await LoadAsync();
+        Messenger.AddInformation("Upload complete.");
+    }
+
+    private async Task DownloadFile(FileEntryDto file)
+    {
+        try
+        {
+            var baseUrl = Nav.BaseUri.TrimEnd('/');
+            var url = $"{baseUrl}/api/files/{file.Id}/download";
+            await JS.InvokeVoidAsync("triggerFileDownload", url, file.FileName, Auth.Token);
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Download failed: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteFile(FileEntryDto file)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Delete '{file.FileName}'?");
+        if (!confirmed) return;
+
+        try
+        {
+            await Api.DeleteFileAsync(file.Id);
+            await LoadAsync();
+            Messenger.AddInformation("File deleted.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to delete: {ex.Message}");
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

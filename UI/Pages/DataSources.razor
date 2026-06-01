@@ -1,0 +1,282 @@
+@page "/datasources"
+@inject ApiService Api
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IHxMessengerService Messenger
+@inject IHxMessageBoxService MessageBox
+
+@if (!Auth.IsAuthenticated)
+{
+    Nav.NavigateTo("/login");
+    return;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3><i class="bi bi-database me-2"></i>Data Sources</h3>
+    <HxButton Color="ThemeColor.Primary" OnClick="ShowCreateModal">
+        <i class="bi bi-plus-lg me-1"></i> New Data Source
+    </HxButton>
+</div>
+
+@if (_dataSources is null)
+{
+    <div class="d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        Loading...
+    </div>
+}
+else if (_dataSources.Count == 0)
+{
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle me-2"></i>No data sources yet. Create one to start storing encrypted files.
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var ds in _dataSources)
+        {
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="bi bi-folder-fill text-warning me-2"></i>@ds.Name
+                        </h5>
+                        <p class="card-text text-muted mb-1">
+                            @ds.FileCount file(s) - @FormatBytes(ds.TotalFileSize)
+                        </p>
+                        <small class="text-muted d-block">Backend: @ds.BackendFtpHost:@ds.BackendFtpPort</small>
+                        @if (ds.FrontendFtpEnabled)
+                        {
+                            <span class="badge bg-info me-1 mt-1">FTP @(ds.FrontendFtpAllowAnonymous ? "(anon)" : "")</span>
+                        }
+                        @if (ds.FrontendHttpEnabled)
+                        {
+                            <span class="badge bg-success me-1 mt-1">HTTP @(ds.FrontendHttpAllowAnonymous ? "(anon)" : "")</span>
+                        }
+                        <br />
+                        <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
+                    </div>
+                    <div class="card-footer d-flex gap-2">
+                        <HxButton Color="ThemeColor.Primary" Size="ButtonSize.Small" OnClick="() => BrowseDataSource(ds.Id)">
+                            <i class="bi bi-folder2-open me-1"></i> Browse
+                        </HxButton>
+                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="() => ShowEditModal(ds)">
+                            <i class="bi bi-pencil me-1"></i> Edit
+                        </HxButton>
+                        <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)">
+                            <i class="bi bi-trash me-1"></i> Delete
+                        </HxButton>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@* Create / Edit Modal *@
+<HxModal @bind-IsOpen="_showModal" Title="@(_editId.HasValue ? "Edit Data Source" : "New Data Source")">
+    <BodyTemplate>
+        <h6 class="text-muted mb-2">General</h6>
+        <div class="mb-3">
+            <HxInputText Label="Name" @bind-Value="_name" Placeholder="My Documents" />
+        </div>
+
+        <h6 class="text-muted mb-2 mt-4">Backend FTP Server</h6>
+        <div class="row g-2 mb-3">
+            <div class="col-8"><HxInputText Label="Host" @bind-Value="_backendHost" Placeholder="ftp.example.com" /></div>
+            <div class="col-4"><HxInputNumber Label="Port" @bind-Value="_backendPort" /></div>
+        </div>
+        <div class="row g-2 mb-3">
+            <div class="col-6"><HxInputText Label="Username" @bind-Value="_backendUser" /></div>
+            <div class="col-6"><HxInputText Label="Password" @bind-Value="_backendPass" Type="InputType.Password" /></div>
+        </div>
+        <div class="mb-3">
+            <HxInputText Label="Base Path" @bind-Value="_backendPath" Placeholder="/" />
+        </div>
+        <div class="mb-3">
+            <HxSwitch @bind-Value="_backendSsl" Text="Use SSL/TLS" />
+        </div>
+
+        <h6 class="text-muted mb-2 mt-4">Frontend Access</h6>
+        <div class="mb-2">
+            <HxSwitch @bind-Value="_ftpEnabled" Text="Enable FTP Server" />
+            @if (_ftpEnabled)
+            {
+                <div class="ms-4 mt-1">
+                    <HxSwitch @bind-Value="_ftpAnon" Text="Allow Anonymous" />
+                    @if (_editFtpPassword is not null)
+                    {
+                        <small class="text-muted d-block mt-1">FTP Password: <code>@_editFtpPassword</code></small>
+                    }
+                </div>
+            }
+        </div>
+        <div class="mb-2">
+            <HxSwitch @bind-Value="_httpEnabled" Text="Enable HTTP File Server" />
+            @if (_httpEnabled)
+            {
+                <div class="ms-4 mt-1">
+                    <HxSwitch @bind-Value="_httpAnon" Text="Allow Anonymous" />
+                    @if (_editHttpPassword is not null)
+                    {
+                        <small class="text-muted d-block mt-1">HTTP Password: <code>@_editHttpPassword</code></small>
+                    }
+                </div>
+            }
+        </div>
+        <small class="text-muted">Username is your email. Passwords are auto-generated when a frontend is first enabled.</small>
+    </BodyTemplate>
+    <FooterTemplate>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _showModal = false">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Primary" OnClick="SaveDataSource" Enabled="@IsFormValid()">
+            @(_editId.HasValue ? "Save" : "Create")
+        </HxButton>
+    </FooterTemplate>
+</HxModal>
+
+@code {
+    private List<DataSourceDto>? _dataSources;
+    private bool _showModal;
+    private Guid? _editId;
+
+    // Form fields
+    private string _name = string.Empty;
+    private string _backendHost = string.Empty;
+    private int _backendPort = 21;
+    private string _backendUser = string.Empty;
+    private string _backendPass = string.Empty;
+    private string _backendPath = "/";
+    private bool _backendSsl;
+    private bool _ftpEnabled;
+    private bool _ftpAnon;
+    private bool _httpEnabled;
+    private bool _httpAnon;
+    private string? _editFtpPassword;
+    private string? _editHttpPassword;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAuthenticated) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _dataSources = await Api.GetDataSourcesAsync();
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to load data sources: {ex.Message}");
+            _dataSources = [];
+        }
+    }
+
+    private void ShowCreateModal()
+    {
+        _editId = null;
+        _name = string.Empty;
+        _backendHost = string.Empty;
+        _backendPort = 21;
+        _backendUser = string.Empty;
+        _backendPass = string.Empty;
+        _backendPath = "/";
+        _backendSsl = false;
+        _ftpEnabled = false;
+        _ftpAnon = false;
+        _httpEnabled = false;
+        _httpAnon = false;
+        _editFtpPassword = null;
+        _editHttpPassword = null;
+        _showModal = true;
+    }
+
+    private void ShowEditModal(DataSourceDto ds)
+    {
+        _editId = ds.Id;
+        _name = ds.Name;
+        _backendHost = ds.BackendFtpHost;
+        _backendPort = ds.BackendFtpPort;
+        _backendUser = ds.BackendFtpUsername;
+        _backendPass = string.Empty; // Don't pre-fill password
+        _backendPath = ds.BackendFtpBasePath;
+        _backendSsl = ds.BackendFtpUseSsl;
+        _ftpEnabled = ds.FrontendFtpEnabled;
+        _ftpAnon = ds.FrontendFtpAllowAnonymous;
+        _httpEnabled = ds.FrontendHttpEnabled;
+        _httpAnon = ds.FrontendHttpAllowAnonymous;
+        _editFtpPassword = ds.FrontendFtpPassword;
+        _editHttpPassword = ds.FrontendHttpPassword;
+        _showModal = true;
+    }
+
+    private bool IsFormValid() =>
+        !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_backendHost);
+
+    private async Task SaveDataSource()
+    {
+        try
+        {
+            if (_editId.HasValue)
+            {
+                var req = new UpdateDataSourceRequest(
+                    _name.Trim(), _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
+                    _ftpEnabled, _ftpAnon, _httpEnabled, _httpAnon);
+                await Api.UpdateDataSourceAsync(_editId.Value, req);
+                Messenger.AddInformation("Data source updated.");
+            }
+            else
+            {
+                var req = new CreateDataSourceRequest(
+                    _name.Trim(), _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
+                    _ftpEnabled, _ftpAnon, _httpEnabled, _httpAnon);
+                await Api.CreateDataSourceAsync(req);
+                Messenger.AddInformation("Data source created.");
+            }
+
+            _showModal = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to save: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteDataSource(DataSourceDto ds)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Delete '{ds.Name}' and all its files?");
+        if (!confirmed) return;
+
+        try
+        {
+            await Api.DeleteDataSourceAsync(ds.Id);
+            await LoadAsync();
+            Messenger.AddInformation("Data source deleted.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to delete: {ex.Message}");
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+
+    private void BrowseDataSource(Guid id)
+    {
+        Nav.NavigateTo($"/files/{id}");
+    }
+}

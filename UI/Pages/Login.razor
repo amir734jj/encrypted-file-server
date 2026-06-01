@@ -1,0 +1,70 @@
+@page "/login"
+@inject ApiService Api
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IHxMessengerService Messenger
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h4 class="card-title text-center mb-4">
+                    <i class="bi bi-shield-lock me-2"></i>Login
+                </h4>
+
+                <EditForm Model="@_model" OnValidSubmit="HandleLogin">
+                    <div class="mb-3">
+                        <HxInputText Label="Email" @bind-Value="_model.Email" Type="InputType.Email" Placeholder="you@example.com" />
+                    </div>
+                    <div class="mb-3">
+                        <HxInputText Label="Password" @bind-Value="_model.Password" Type="InputType.Password" />
+                    </div>
+                    <HxSubmit Color="ThemeColor.Primary" CssClass="w-100" Enabled="@(!_loading)">
+                        @if (_loading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Login
+                    </HxSubmit>
+                </EditForm>
+
+                <hr />
+                <div class="text-center">
+                    <a href="/register">Don't have an account? Register</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginModel _model = new();
+    private bool _loading;
+
+    protected override void OnInitialized()
+    {
+        if (Auth.IsAuthenticated)
+            Nav.NavigateTo("/");
+    }
+
+    private async Task HandleLogin()
+    {
+        _loading = true;
+        var error = await Api.LoginAsync(_model.Email, _model.Password);
+        _loading = false;
+
+        if (error is not null)
+        {
+            Messenger.AddError(error);
+            return;
+        }
+
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    private class LoginModel
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}
