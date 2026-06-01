@@ -147,12 +147,12 @@ else
     </small>
 }
 
-<HxModal @bind-Open="_showNewFolder" Title="New Folder">
+<HxModal @ref="_newFolderModal" Title="New Folder">
     <BodyTemplate>
         <HxInputText Label="Folder Name" @bind-Value="_newFolderName" Placeholder="documents" />
     </BodyTemplate>
     <FooterTemplate>
-        <HxButton Color="ThemeColor.Secondary" OnClick="() => _showNewFolder = false">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _newFolderModal.HideAsync()">Cancel</HxButton>
         <HxButton Color="ThemeColor.Primary" OnClick="CreateFolder"
                   Enabled="@(!string.IsNullOrWhiteSpace(_newFolderName))">Create</HxButton>
     </FooterTemplate>
@@ -164,7 +164,7 @@ else
 
     private DirectoryListingDto? _listing;
     private bool _uploading;
-    private bool _showNewFolder;
+    private HxModal _newFolderModal = null!;
     private string _newFolderName = string.Empty;
 
     protected override async Task OnParametersSetAsync()
@@ -199,15 +199,15 @@ else
         Nav.NavigateTo(url);
     }
 
-    private void ShowNewFolderPrompt()
+    private async Task ShowNewFolderPrompt()
     {
         _newFolderName = string.Empty;
-        _showNewFolder = true;
+        await _newFolderModal.ShowAsync();
     }
 
-    private void CreateFolder()
+    private async Task CreateFolder()
     {
-        _showNewFolder = false;
+        await _newFolderModal.HideAsync();
         var folderPath = string.IsNullOrEmpty(Path)
             ? _newFolderName.Trim()
             : $"{Path}/{_newFolderName.Trim()}";

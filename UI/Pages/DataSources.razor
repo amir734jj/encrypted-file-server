@@ -74,7 +74,7 @@ else
 }
 
 @* Create / Edit Modal *@
-<HxModal @bind-Open="_showModal" Title="@(_editId.HasValue ? "Edit Data Source" : "New Data Source")">
+<HxModal @ref="_modal" Title="@(_editId.HasValue ? "Edit Data Source" : "New Data Source")">
     <BodyTemplate>
         <h6 class="text-muted mb-2">General</h6>
         <div class="mb-3">
@@ -144,7 +144,7 @@ else
         <small class="text-muted">Username/password for frontends is the same as your website login.</small>
     </BodyTemplate>
     <FooterTemplate>
-        <HxButton Color="ThemeColor.Secondary" OnClick="() => _showModal = false">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _modal.HideAsync()">Cancel</HxButton>
         <HxButton Color="ThemeColor.Primary" OnClick="SaveDataSource" Enabled="@IsFormValid()">
             @(_editId.HasValue ? "Save" : "Create")
         </HxButton>
@@ -153,7 +153,7 @@ else
 
 @code {
     private List<DataSourceDto>? _dataSources;
-    private bool _showModal;
+    private HxModal _modal = null!;
     private Guid? _editId;
 
     // Form fields
@@ -192,7 +192,7 @@ else
         }
     }
 
-    private void ShowCreateModal()
+    private async Task ShowCreateModal()
     {
         _editId = null;
         _name = string.Empty;
@@ -210,10 +210,10 @@ else
         _sftpEnabled = false;
         _sftpAnon = false;
         _encryptionMethod = EncryptionMethod.AesCtr256;
-        _showModal = true;
+        await _modal.ShowAsync();
     }
 
-    private void ShowEditModal(DataSourceDto ds)
+    private async Task ShowEditModal(DataSourceDto ds)
     {
         _editId = ds.Id;
         _name = ds.Name;
@@ -234,7 +234,7 @@ else
         _sftpEnabled = sftpFrontend is not null;
         _sftpAnon = sftpFrontend?.AllowAnonymous ?? false;
         _encryptionMethod = ds.Backend.EncryptionMethod;
-        _showModal = true;
+        await _modal.ShowAsync();
     }
 
     private bool IsFormValid() =>
@@ -264,7 +264,7 @@ else
                 Messenger.AddInformation("Data source created.");
             }
 
-            _showModal = false;
+            await _modal.HideAsync();
             await LoadAsync();
         }
         catch (Exception ex)
