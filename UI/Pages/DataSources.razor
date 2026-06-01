@@ -424,6 +424,11 @@ else
         {
             var result = await Api.DecryptDataSourceAsync(ds.Id);
             Messenger.AddInformation($"Decrypted {result.Processed}/{result.TotalFiles} file(s).");
+            await LoadAsync();
+        }
+        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            Messenger.AddWarning("A bulk operation is already running for this data source.");
         }
         catch (Exception ex)
         {
@@ -451,6 +456,11 @@ else
         {
             var result = await Api.ReEncryptDataSourceAsync(_reEncryptingDs.Id, _dsReEncryptMethod);
             Messenger.AddInformation($"Re-encrypted {result.Processed}/{result.TotalFiles} file(s) to {_dsReEncryptMethod}.");
+            await LoadAsync();
+        }
+        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            Messenger.AddWarning("A bulk operation is already running for this data source.");
         }
         catch (Exception ex)
         {

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
@@ -17,6 +18,8 @@ public sealed class DataSourcesController(
     IEfRepository repository,
     IFileStorageService fileStorage) : ControllerBase
 {
+    private static readonly ConcurrentDictionary<Guid, byte> RunningOps = new();
+
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private Guid CurrentUserId => User.GetUserId();
 
@@ -80,22 +83,34 @@ public sealed class DataSourcesController(
             return NotFound();
         }
 
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
-            project: f => f)).ToList();
-
-        var processed = 0;
-        foreach (var file in files)
+        if (!RunningOps.TryAdd(id, 0))
         {
-            try
-            {
-                await fileStorage.DecryptFileAsync(file);
-                processed++;
-            }
-            catch { /* skip files that fail */ }
+            return Conflict("A bulk operation is already running for this data source.");
         }
 
-        return Ok(new BulkOperationResult(files.Count, processed));
+        try
+        {
+            var files = (await FileDal.GetAll(
+                filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
+                project: f => f)).ToList();
+
+            var processed = 0;
+            foreach (var file in files)
+            {
+                try
+                {
+                    await fileStorage.DecryptFileAsync(file);
+                    processed++;
+                }
+                catch { /* skip files that fail */ }
+            }
+
+            return Ok(new BulkOperationResult(files.Count, processed));
+        }
+        finally
+        {
+            RunningOps.TryRemove(id, out _);
+        }
     }
 
     [HttpPost("{id:guid}/reencrypt")]
@@ -106,21 +121,33 @@ public sealed class DataSourcesController(
             return NotFound();
         }
 
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
-            project: f => f)).ToList();
-
-        var processed = 0;
-        foreach (var file in files)
+        if (!RunningOps.TryAdd(id, 0))
         {
-            try
-            {
-                await fileStorage.ReEncryptFileAsync(file, method);
-                processed++;
-            }
-            catch { /* skip files that fail */ }
+            return Conflict("A bulk operation is already running for this data source.");
         }
 
-        return Ok(new BulkOperationResult(files.Count, processed));
+        try
+        {
+            var files = (await FileDal.GetAll(
+                filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
+                project: f => f)).ToList();
+
+            var processed = 0;
+            foreach (var file in files)
+            {
+                try
+                {
+                    await fileStorage.ReEncryptFileAsync(file, method);
+                    processed++;
+                }
+                catch { /* skip files that fail */ }
+            }
+
+            return Ok(new BulkOperationResult(files.Count, processed));
+        }
+        finally
+        {
+            RunningOps.TryRemove(id, out _);
+        }
     }
 }
