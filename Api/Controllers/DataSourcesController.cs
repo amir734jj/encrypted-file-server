@@ -1,16 +1,23 @@
+using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Contracts;
+using Shared.Models;
 
 namespace Api.Controllers;
 
 [ApiController]
 [Route("api/datasources")]
 [Authorize]
-public sealed class DataSourcesController(IDataSourceService dataSourceService) : ControllerBase
+public sealed class DataSourcesController(
+    IDataSourceService dataSourceService,
+    IEfRepository repository,
+    IFileStorageService fileStorage) : ControllerBase
 {
+    private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private Guid CurrentUserId => User.GetUserId();
 
     [HttpGet]
@@ -53,5 +60,53 @@ public sealed class DataSourcesController(IDataSourceService dataSourceService) 
     {
         var deleted = await dataSourceService.DeleteAsync(id, CurrentUserId);
         return deleted ? NoContent() : NotFound();
+    }
+
+    [HttpPost("{id:guid}/decrypt")]
+    public async Task<IActionResult> DecryptAll(Guid id)
+    {
+        if (await dataSourceService.GetByIdAsync(id, CurrentUserId) is null)
+            return NotFound();
+
+        var files = (await FileDal.GetAll(
+            filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
+            project: f => f)).ToList();
+
+        var processed = 0;
+        foreach (var file in files)
+        {
+            try
+            {
+                await fileStorage.DecryptFileAsync(file);
+                processed++;
+            }
+            catch { /* skip files that fail */ }
+        }
+
+        return Ok(new BulkOperationResult(files.Count, processed));
+    }
+
+    [HttpPost("{id:guid}/reencrypt")]
+    public async Task<IActionResult> ReEncryptAll(Guid id, [FromQuery] EncryptionMethod method)
+    {
+        if (await dataSourceService.GetByIdAsync(id, CurrentUserId) is null)
+            return NotFound();
+
+        var files = (await FileDal.GetAll(
+            filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
+            project: f => f)).ToList();
+
+        var processed = 0;
+        foreach (var file in files)
+        {
+            try
+            {
+                await fileStorage.ReEncryptFileAsync(file, method);
+                processed++;
+            }
+            catch { /* skip files that fail */ }
+        }
+
+        return Ok(new BulkOperationResult(files.Count, processed));
     }
 }

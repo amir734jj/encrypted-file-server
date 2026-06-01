@@ -70,12 +70,20 @@ else
                         <br />
                         <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
                     </div>
-                    <div class="card-footer d-flex gap-2">
+                    <div class="card-footer d-flex gap-2 flex-wrap">
                         <HxButton Color="ThemeColor.Primary" Size="ButtonSize.Small" OnClick="() => BrowseDataSource(ds.Id)">
                             <i class="bi bi-folder2-open me-1"></i> Browse
                         </HxButton>
                         <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="() => ShowEditModal(ds)">
                             <i class="bi bi-pencil me-1"></i> Edit
+                        </HxButton>
+                        <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true"
+                                  OnClick="() => DecryptDataSource(ds)" title="Decrypt all files">
+                            <i class="bi bi-unlock me-1"></i> Decrypt All
+                        </HxButton>
+                        <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" Outline="true"
+                                  OnClick="() => ShowReEncryptDsModal(ds)" title="Re-encrypt all files">
+                            <i class="bi bi-shield-lock me-1"></i> Re-encrypt All
                         </HxButton>
                         <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)">
                             <i class="bi bi-trash me-1"></i> Delete
@@ -197,9 +205,35 @@ else
     </FooterTemplate>
 </HxModal>
 
+<HxModal @ref="_reEncryptDsModal" Title="Re-encrypt Data Source">
+    <BodyTemplate>
+        @if (_reEncryptingDs is not null)
+        {
+            <p>Re-encrypt all files in <strong>@_reEncryptingDs.Name</strong> (<strong>@_reEncryptingDs.FileCount</strong> file(s)).</p>
+            <p class="text-muted small">Each file is streamed through decrypt → re-encrypt without loading it fully into memory.</p>
+            <div class="mb-3">
+                <label class="form-label">Target Encryption</label>
+                <select class="form-select" @bind="_dsReEncryptMethod">
+                    <option value="@EncryptionMethod.None">None (plaintext)</option>
+                    <option value="@EncryptionMethod.AesCtr256">AES-CTR-256</option>
+                    <option value="@EncryptionMethod.AesGcm256">AES-GCM-256</option>
+                    <option value="@EncryptionMethod.ChaCha20Poly1305">ChaCha20-Poly1305</option>
+                </select>
+            </div>
+        }
+    </BodyTemplate>
+    <FooterTemplate>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _reEncryptDsModal.HideAsync()">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Warning" OnClick="ReEncryptDataSource">Re-encrypt All</HxButton>
+    </FooterTemplate>
+</HxModal>
+
 @code {
     private List<DataSourceDto>? _dataSources;
     private HxModal _modal = null!;
+    private HxModal _reEncryptDsModal = null!;
+    private DataSourceDto? _reEncryptingDs;
+    private EncryptionMethod _dsReEncryptMethod = EncryptionMethod.AesCtr256;
     private Guid? _editId;
 
     // Form fields
@@ -350,6 +384,45 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to delete: {ex.Message}");
+        }
+    }
+
+    private async Task DecryptDataSource(DataSourceDto ds)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Decrypt all {ds.FileCount} file(s) in '{ds.Name}'? This removes encryption from every file.");
+        if (!confirmed) return;
+
+        try
+        {
+            var result = await Api.DecryptDataSourceAsync(ds.Id);
+            Messenger.AddInformation($"Decrypted {result.Processed}/{result.TotalFiles} file(s).");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Bulk decrypt failed: {ex.Message}");
+        }
+    }
+
+    private async Task ShowReEncryptDsModal(DataSourceDto ds)
+    {
+        _reEncryptingDs = ds;
+        _dsReEncryptMethod = EncryptionMethod.AesCtr256;
+        await _reEncryptDsModal.ShowAsync();
+    }
+
+    private async Task ReEncryptDataSource()
+    {
+        if (_reEncryptingDs is null) return;
+        await _reEncryptDsModal.HideAsync();
+
+        try
+        {
+            var result = await Api.ReEncryptDataSourceAsync(_reEncryptingDs.Id, _dsReEncryptMethod);
+            Messenger.AddInformation($"Re-encrypted {result.Processed}/{result.TotalFiles} file(s) to {_dsReEncryptMethod}.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Bulk re-encrypt failed: {ex.Message}");
         }
     }
 

@@ -1,4 +1,5 @@
 using Refit;
+using Shared.Models;
 
 namespace Shared.Contracts.Interfaces;
 
@@ -16,4 +17,10 @@ public interface IDataSourcesApi
 
     [Delete("/api/datasources/{id}")]
     Task DeleteAsync(Guid id);
+
+    [Post("/api/datasources/{id}/decrypt")]
+    Task<BulkOperationResult> DecryptAllAsync(Guid id);
+
+    [Post("/api/datasources/{id}/reencrypt")]
+    Task<BulkOperationResult> ReEncryptAllAsync(Guid id, [Query] EncryptionMethod method);
 }

@@ -84,6 +84,8 @@ public sealed class ApiService(
     public Task<DataSourceDto> CreateDataSourceAsync(CreateDataSourceRequest req) => dataSourcesApi.CreateAsync(req);
     public Task UpdateDataSourceAsync(Guid id, UpdateDataSourceRequest req) => dataSourcesApi.UpdateAsync(id, req);
     public Task DeleteDataSourceAsync(Guid id) => dataSourcesApi.DeleteAsync(id);
+    public Task<BulkOperationResult> DecryptDataSourceAsync(Guid id) => dataSourcesApi.DecryptAllAsync(id);
+    public Task<BulkOperationResult> ReEncryptDataSourceAsync(Guid id, EncryptionMethod method) => dataSourcesApi.ReEncryptAllAsync(id, method);
 
     public Task<DirectoryListingDto> GetFilesAsync(Guid dataSourceId, string path = "")
         => filesApi.GetAllAsync(dataSourceId, path);
