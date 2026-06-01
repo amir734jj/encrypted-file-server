@@ -211,10 +211,17 @@ public sealed class FilesController(
 
         var toDelete = allFiles.Where(f =>
         {
-            var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
-            return fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+                return fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }).ToList();
 
         foreach (var file in toDelete)

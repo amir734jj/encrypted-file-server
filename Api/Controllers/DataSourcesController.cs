@@ -35,7 +35,7 @@ public sealed class DataSourcesController(
     public async Task<IActionResult> GetMasterPassword(Guid id)
     {
         var password = await dataSourceService.GetMasterPasswordAsync(id, CurrentUserId);
-        return password is not null ? Ok(new { password }) : NotFound();
+        return password is not null ? Ok(new MasterPasswordResponse(password)) : NotFound();
     }
 
     [HttpGet]
