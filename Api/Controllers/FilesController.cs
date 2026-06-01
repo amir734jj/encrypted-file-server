@@ -80,8 +80,11 @@ public sealed class FilesController(
 
     [HttpPost("upload")]
     [RequestSizeLimit(500_000_000)]
-    public async Task<IActionResult> Upload([FromQuery] Guid dataSourceId, [FromQuery] string path, IFormFile file)
+    public async Task<IActionResult> Upload([FromQuery] Guid dataSourceId, [FromQuery] string path = "", IFormFile? file = null)
     {
+        if (file is null)
+            return BadRequest("No file provided.");
+
         var dsExists = await DataSourceDal.Any(filterExprs: [d => d.Id == dataSourceId && d.UserId == CurrentUserId]);
         if (!dsExists)
             return NotFound("Data source not found.");
