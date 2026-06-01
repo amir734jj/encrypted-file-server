@@ -151,7 +151,7 @@ builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
 });
 builder.Services.Configure<FubarDev.FtpServer.FtpConnectionOptions>(opt =>
 {
-    opt.InactivityTimeout = TimeSpan.FromMinutes(30);
+    opt.InactivityTimeout = TimeSpan.FromMinutes(60);
 });
 builder.Services.Configure<FubarDev.FtpServer.AuthTlsOptions>(opt =>
 {
