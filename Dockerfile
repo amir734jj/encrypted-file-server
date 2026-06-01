@@ -13,7 +13,7 @@ RUN apk add --no-cache krb5-libs
 
 COPY --from=build /app/publish .
 
-EXPOSE 5000 2121 2222 50000-50100
+EXPOSE 3000 2121 2222 50000 50001 50002 50003 50004
 
 ENV ASPNETCORE_ENVIRONMENT=Production
 

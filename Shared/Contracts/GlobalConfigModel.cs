@@ -9,7 +9,7 @@ public class GlobalConfigModel
     public int FtpPassivePortMin { get; set; } = 50000;
 
     [GlobalConfigCol(Name = "FTP_PASSIVE_PORT_MAX")]
-    public int FtpPassivePortMax { get; set; } = 50100;
+    public int FtpPassivePortMax { get; set; } = 50004;
 
     [GlobalConfigCol(Name = "SFTP_PORT")]
     public int SftpPort { get; set; } = 2222;
