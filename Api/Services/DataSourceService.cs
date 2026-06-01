@@ -3,6 +3,7 @@ using Api.Data.Entities;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
 using Shared.Contracts;
+using Shared.Models;
 
 namespace Api.Services;
 
@@ -50,19 +51,22 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         {
             UserId = userId,
             Name = req.Name.Trim(),
-            EncryptionMethod = req.EncryptionMethod,
-            BackendFtpHost = req.BackendFtpHost,
-            BackendFtpPort = req.BackendFtpPort,
-            BackendFtpUsername = req.BackendFtpUsername,
-            BackendFtpPassword = req.BackendFtpPassword,
-            BackendFtpBasePath = req.BackendFtpBasePath,
-            BackendFtpUseSsl = req.BackendFtpUseSsl,
-            FrontendFtpEnabled = req.FrontendFtpEnabled,
-            FrontendFtpAllowAnonymous = req.FrontendFtpAllowAnonymous,
-            FrontendFtpPassword = req.FrontendFtpEnabled ? GeneratePassword() : null,
-            FrontendHttpEnabled = req.FrontendHttpEnabled,
-            FrontendHttpAllowAnonymous = req.FrontendHttpAllowAnonymous,
-            FrontendHttpPassword = req.FrontendHttpEnabled ? GeneratePassword() : null,
+            Backend = new BackendConfig
+            {
+                Host = req.Backend.Host,
+                Port = req.Backend.Port,
+                Username = req.Backend.Username,
+                Password = req.Backend.Password,
+                BasePath = req.Backend.BasePath,
+                UseSsl = req.Backend.UseSsl,
+                EncryptionMethod = req.Backend.EncryptionMethod,
+            },
+            Frontends = req.Frontends.Select(f => new FrontendConfig
+            {
+                Type = f.Type,
+                AllowAnonymous = f.AllowAnonymous,
+                Password = GeneratePassword(),
+            }).ToList(),
         });
 
         return ToDto(ds, 0, 0);
@@ -76,23 +80,37 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         await Dal.Update(id, ds =>
         {
             ds.Name = req.Name.Trim();
-            ds.EncryptionMethod = req.EncryptionMethod;
-            ds.BackendFtpHost = req.BackendFtpHost;
-            ds.BackendFtpPort = req.BackendFtpPort;
-            ds.BackendFtpUsername = req.BackendFtpUsername;
-            ds.BackendFtpPassword = req.BackendFtpPassword;
-            ds.BackendFtpBasePath = req.BackendFtpBasePath;
-            ds.BackendFtpUseSsl = req.BackendFtpUseSsl;
+            ds.Backend.Host = req.Backend.Host;
+            ds.Backend.Port = req.Backend.Port;
+            ds.Backend.Username = req.Backend.Username;
+            ds.Backend.Password = req.Backend.Password;
+            ds.Backend.BasePath = req.Backend.BasePath;
+            ds.Backend.UseSsl = req.Backend.UseSsl;
+            ds.Backend.EncryptionMethod = req.Backend.EncryptionMethod;
 
-            if (req.FrontendFtpEnabled && !ds.FrontendFtpEnabled)
-                ds.FrontendFtpPassword ??= GeneratePassword();
-            ds.FrontendFtpEnabled = req.FrontendFtpEnabled;
-            ds.FrontendFtpAllowAnonymous = req.FrontendFtpAllowAnonymous;
+            // Sync frontends: add new, update existing, remove absent
+            var requestedTypes = req.Frontends.Select(f => f.Type).ToHashSet();
 
-            if (req.FrontendHttpEnabled && !ds.FrontendHttpEnabled)
-                ds.FrontendHttpPassword ??= GeneratePassword();
-            ds.FrontendHttpEnabled = req.FrontendHttpEnabled;
-            ds.FrontendHttpAllowAnonymous = req.FrontendHttpAllowAnonymous;
+            // Remove frontends that are no longer requested
+            ds.Frontends.RemoveAll(f => !requestedTypes.Contains(f.Type));
+
+            foreach (var fr in req.Frontends)
+            {
+                var existing = ds.GetFrontend(fr.Type);
+                if (existing is not null)
+                {
+                    existing.AllowAnonymous = fr.AllowAnonymous;
+                }
+                else
+                {
+                    ds.Frontends.Add(new FrontendConfig
+                    {
+                        Type = fr.Type,
+                        AllowAnonymous = fr.AllowAnonymous,
+                        Password = GeneratePassword(),
+                    });
+                }
+            }
         });
 
         return true;
@@ -119,10 +137,10 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
     }
 
     private static DataSourceDto ToDto(DataSource d, long totalSize, int fileCount) =>
-        new(d.Id, d.Name, d.EncryptionMethod, totalSize, fileCount, d.CreatedAt,
-            d.BackendFtpHost, d.BackendFtpPort, d.BackendFtpUsername, d.BackendFtpBasePath, d.BackendFtpUseSsl,
-            d.FrontendFtpEnabled, d.FrontendFtpPassword, d.FrontendFtpAllowAnonymous,
-            d.FrontendHttpEnabled, d.FrontendHttpPassword, d.FrontendHttpAllowAnonymous);
+        new(d.Id, d.Name, totalSize, fileCount, d.CreatedAt,
+            new BackendDto(d.Backend.Host, d.Backend.Port, d.Backend.Username,
+                d.Backend.BasePath, d.Backend.UseSsl, d.Backend.EncryptionMethod),
+            d.Frontends.Select(f => new FrontendDto(f.Type, f.Password, f.AllowAnonymous)).ToList());
 
     private static string GeneratePassword()
     {

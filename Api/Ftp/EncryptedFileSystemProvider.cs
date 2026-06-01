@@ -9,6 +9,7 @@ using FubarDev.FtpServer.FileSystem;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
+using Shared.Models;
 
 namespace Api.Ftp;
 
@@ -73,7 +74,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     private async Task<IEncryptionProvider> GetEncryptionForDataSourceAsync(Guid dataSourceId)
     {
         var ds = await _db.DataSources.FirstAsync(d => d.Id == dataSourceId);
-        return _encryptionFactory.GetProvider(ds.EncryptionMethod);
+        return _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
     }
 
     private string DecryptFileName(EncryptedFile f, byte[] masterKey, IEncryptionProvider encryption)
@@ -100,10 +101,10 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         {
             var dataSources = IsAnonymous
                 ? await _db.DataSources
-                    .Where(d => d.FrontendFtpAllowAnonymous)
+                    .Where(d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous))
                     .OrderBy(d => d.Name).ToListAsync(ct)
                 : await _db.DataSources
-                    .Where(d => d.UserId == _userId && d.FrontendFtpEnabled)
+                    .Where(d => d.UserId == _userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp))
                     .OrderBy(d => d.Name).ToListAsync(ct);
 
             return dataSources
@@ -160,9 +161,9 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         {
             var ds = IsAnonymous
                 ? await _db.DataSources.FirstOrDefaultAsync(
-                    d => d.FrontendFtpAllowAnonymous && d.Name == name, ct)
+                    d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous) && d.Name == name, ct)
                 : await _db.DataSources.FirstOrDefaultAsync(
-                    d => d.UserId == _userId && d.FrontendFtpEnabled && d.Name == name, ct);
+                    d => d.UserId == _userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp) && d.Name == name, ct);
             return ds is null ? null : new VirtualDirectoryEntry(ds.Name, ds.Id, "");
         }
 

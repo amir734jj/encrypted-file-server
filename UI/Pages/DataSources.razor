@@ -1,4 +1,5 @@
 @page "/datasources"
+@using Shared.Models
 @inject ApiService Api
 @inject AuthService Auth
 @inject NavigationManager Nav
@@ -45,16 +46,13 @@ else
                         <p class="card-text text-muted mb-1">
                             @ds.FileCount file(s) - @FormatBytes(ds.TotalFileSize)
                         </p>
-                        <small class="text-muted d-block">Backend: @ds.BackendFtpHost:@ds.BackendFtpPort</small>
-                        @if (ds.FrontendFtpEnabled)
+                        <small class="text-muted d-block">Backend: @ds.Backend.Host:@ds.Backend.Port</small>
+                        @foreach (var fe in ds.Frontends)
                         {
-                            <span class="badge bg-info me-1 mt-1">FTP @(ds.FrontendFtpAllowAnonymous ? "(anon)" : "")</span>
+                            var badgeClass = fe.Type == FrontendType.Ftp ? "bg-info" : "bg-success";
+                            <span class="badge @badgeClass me-1 mt-1">@fe.Type @(fe.AllowAnonymous ? "(anon)" : "")</span>
                         }
-                        @if (ds.FrontendHttpEnabled)
-                        {
-                            <span class="badge bg-success me-1 mt-1">HTTP @(ds.FrontendHttpAllowAnonymous ? "(anon)" : "")</span>
-                        }
-                        <span class="badge bg-secondary me-1 mt-1">@ds.EncryptionMethod</span>
+                        <span class="badge bg-secondary me-1 mt-1">@ds.Backend.EncryptionMethod</span>
                         <br />
                         <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
                     </div>
@@ -85,9 +83,10 @@ else
         <div class="mb-3">
             <label class="form-label">Encryption Method</label>
             <select class="form-select" @bind="_encryptionMethod">
-                <option value="aes-ctr-256">AES-256-CTR (streaming)</option>
-                <option value="aes-gcm-256">AES-256-GCM (AEAD, chunked)</option>
-                <option value="chacha20-poly1305">ChaCha20-Poly1305 (AEAD, chunked)</option>
+                @foreach (var method in Enum.GetValues<EncryptionMethod>())
+                {
+                    <option value="@method">@method</option>
+                }
             </select>
         </div>
 
@@ -161,7 +160,7 @@ else
     private bool _ftpAnon;
     private bool _httpEnabled;
     private bool _httpAnon;
-    private string _encryptionMethod = "aes-ctr-256";
+    private EncryptionMethod _encryptionMethod = EncryptionMethod.AesCtr256;
     private string? _editFtpPassword;
     private string? _editHttpPassword;
 
@@ -198,7 +197,7 @@ else
         _ftpAnon = false;
         _httpEnabled = false;
         _httpAnon = false;
-        _encryptionMethod = "aes-ctr-256";
+        _encryptionMethod = EncryptionMethod.AesCtr256;
         _editFtpPassword = null;
         _editHttpPassword = null;
         _showModal = true;
@@ -208,19 +207,21 @@ else
     {
         _editId = ds.Id;
         _name = ds.Name;
-        _backendHost = ds.BackendFtpHost;
-        _backendPort = ds.BackendFtpPort;
-        _backendUser = ds.BackendFtpUsername;
+        _backendHost = ds.Backend.Host;
+        _backendPort = ds.Backend.Port;
+        _backendUser = ds.Backend.Username;
         _backendPass = string.Empty; // Don't pre-fill password
-        _backendPath = ds.BackendFtpBasePath;
-        _backendSsl = ds.BackendFtpUseSsl;
-        _ftpEnabled = ds.FrontendFtpEnabled;
-        _ftpAnon = ds.FrontendFtpAllowAnonymous;
-        _httpEnabled = ds.FrontendHttpEnabled;
-        _httpAnon = ds.FrontendHttpAllowAnonymous;
-        _encryptionMethod = ds.EncryptionMethod;
-        _editFtpPassword = ds.FrontendFtpPassword;
-        _editHttpPassword = ds.FrontendHttpPassword;
+        _backendPath = ds.Backend.BasePath;
+        _backendSsl = ds.Backend.UseSsl;
+        var ftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Ftp);
+        var httpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
+        _ftpEnabled = ftpFrontend is not null;
+        _ftpAnon = ftpFrontend?.AllowAnonymous ?? false;
+        _httpEnabled = httpFrontend is not null;
+        _httpAnon = httpFrontend?.AllowAnonymous ?? false;
+        _encryptionMethod = ds.Backend.EncryptionMethod;
+        _editFtpPassword = ftpFrontend?.Password;
+        _editHttpPassword = httpFrontend?.Password;
         _showModal = true;
     }
 
@@ -231,19 +232,20 @@ else
     {
         try
         {
+            var backend = new BackendRequest(_backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl, _encryptionMethod);
+            var frontends = new List<FrontendRequest>();
+            if (_ftpEnabled) frontends.Add(new FrontendRequest(FrontendType.Ftp, _ftpAnon));
+            if (_httpEnabled) frontends.Add(new FrontendRequest(FrontendType.Http, _httpAnon));
+
             if (_editId.HasValue)
             {
-                var req = new UpdateDataSourceRequest(
-                    _name.Trim(), _encryptionMethod, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
-                    _ftpEnabled, _ftpAnon, _httpEnabled, _httpAnon);
+                var req = new UpdateDataSourceRequest(_name.Trim(), backend, frontends);
                 await Api.UpdateDataSourceAsync(_editId.Value, req);
                 Messenger.AddInformation("Data source updated.");
             }
             else
             {
-                var req = new CreateDataSourceRequest(
-                    _name.Trim(), _encryptionMethod, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
-                    _ftpEnabled, _ftpAnon, _httpEnabled, _httpAnon);
+                var req = new CreateDataSourceRequest(_name.Trim(), backend, frontends);
                 await Api.CreateDataSourceAsync(req);
                 Messenger.AddInformation("Data source created.");
             }

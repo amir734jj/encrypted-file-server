@@ -1,5 +1,5 @@
 using Api.Interfaces;
-using Shared.Contracts;
+using Shared.Models;
 
 namespace Api.Data.Entities;
 
@@ -9,21 +9,14 @@ public sealed class DataSource : IEntity
     public Guid UserId { get; set; }
     public User? User { get; set; }
     public string Name { get; set; } = string.Empty;
-    public string EncryptionMethod { get; set; } = "aes-ctr-256";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    public string BackendFtpHost { get; set; } = string.Empty;
-    public int BackendFtpPort { get; set; } = 21;
-    public string BackendFtpUsername { get; set; } = string.Empty;
-    public string BackendFtpPassword { get; set; } = string.Empty;
-    public string BackendFtpBasePath { get; set; } = "/";
-    public bool BackendFtpUseSsl { get; set; }
+    public BackendConfig Backend { get; set; } = new();
+    public List<FrontendConfig> Frontends { get; set; } = [];
 
-    public bool FrontendFtpEnabled { get; set; }
-    public string? FrontendFtpPassword { get; set; }
-    public bool FrontendFtpAllowAnonymous { get; set; }
+    public FrontendConfig? GetFrontend(FrontendType type) =>
+        Frontends.FirstOrDefault(f => f.Type == type);
 
-    public bool FrontendHttpEnabled { get; set; }
-    public string? FrontendHttpPassword { get; set; }
-    public bool FrontendHttpAllowAnonymous { get; set; }
+    public bool HasFrontend(FrontendType type) =>
+        Frontends.Any(f => f.Type == type);
 }

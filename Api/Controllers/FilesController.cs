@@ -32,7 +32,7 @@ public sealed class FilesController(
 
         var ds = await GetDataSource(dataSourceId);
         if (ds is null) return NotFound();
-        var encryption = encryptionFactory.GetProvider(ds.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         path = NormalizePath(path);
 
@@ -99,7 +99,7 @@ public sealed class FilesController(
             CurrentUserId, dataSourceId, fullPath, file.ContentType, stream);
 
         var ds = await GetDataSource(dataSourceId);
-        var encryption = encryptionFactory.GetProvider(ds!.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
         var iv = Convert.FromBase64String(entity.IvBase64);
         var user = await users.FindByIdAsync(CurrentUserId.ToString());
         var masterKey = Convert.FromBase64String(user!.MasterKeyBase64);
@@ -123,7 +123,7 @@ public sealed class FilesController(
         var file = files.First();
         var ds = await GetDataSource(file.DataSourceId);
         if (ds is null) return NotFound();
-        var encryption = encryptionFactory.GetProvider(ds.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var user = await users.FindByIdAsync(CurrentUserId.ToString());
         if (user is null) return NotFound();
@@ -166,7 +166,7 @@ public sealed class FilesController(
 
         var ds = await GetDataSource(dataSourceId);
         if (ds is null) return NotFound();
-        var encryption = encryptionFactory.GetProvider(ds.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var allFiles = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],

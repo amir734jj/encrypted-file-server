@@ -8,6 +8,7 @@ using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Interfaces;
+using Shared.Models;
 
 namespace Api.Controllers;
 
@@ -30,8 +31,8 @@ public sealed class BrowseController(
             return Challenge();
 
         var dataSources = (await DataSourceDal.GetAll(
-            filterExprs: [d => d.UserId == userId && d.FrontendHttpEnabled],
-            project: d => d)).OrderBy(d => d.Name).ToList();
+            filterExprs: [d => d.UserId == userId],
+            project: d => d)).Where(d => d.HasFrontend(FrontendType.Http)).OrderBy(d => d.Name).ToList();
 
         return Content(RenderDirectoryPage("/ - File Server", "/browse",
             dataSources.Select(ds => (ds.Name, $"/browse/{ds.Id}/", (long?)null, (DateTimeOffset?)ds.CreatedAt))), "text/html");
@@ -43,7 +44,7 @@ public sealed class BrowseController(
         var (ds, masterKey, error) = await AuthorizeDataSource(dataSourceId);
         if (error is not null) return error;
 
-        var encryption = encryptionFactory.GetProvider(ds!.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
         path = NormalizePath(path);
 
         // If path ends with a GUID, try to serve it as a file download
@@ -122,7 +123,7 @@ public sealed class BrowseController(
     private async Task<(DataSource? ds, byte[]? masterKey, IActionResult? error)> AuthorizeDataSource(Guid dataSourceId)
     {
         var dataSources = (await DataSourceDal.GetAll(
-            filterExprs: [d => d.Id == dataSourceId && d.FrontendHttpEnabled],
+            filterExprs: [d => d.Id == dataSourceId],
             project: d => d,
             maxResults: 1)).ToList();
 
@@ -130,8 +131,12 @@ public sealed class BrowseController(
             return (null, null, NotFound());
 
         var ds = dataSources.First();
+        var httpFrontend = ds.GetFrontend(FrontendType.Http);
 
-        if (ds.FrontendHttpAllowAnonymous)
+        if (httpFrontend is null)
+            return (null, null, NotFound());
+
+        if (httpFrontend.AllowAnonymous)
         {
             var user = await users.FindByIdAsync(ds.UserId.ToString());
             if (user is null) return (null, null, NotFound());
@@ -155,7 +160,7 @@ public sealed class BrowseController(
             var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
             var password = decoded.Contains(':') ? decoded[(decoded.IndexOf(':') + 1)..] : decoded;
 
-            if (ds.FrontendHttpPassword is not null && password == ds.FrontendHttpPassword)
+            if (httpFrontend.Password is not null && password == httpFrontend.Password)
             {
                 var user = await users.FindByIdAsync(ds.UserId.ToString());
                 if (user is null) return (null, null, NotFound());

@@ -3,6 +3,7 @@ using Api.Data.Entities;
 using FubarDev.FtpServer.AccountManagement;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Shared.Models;
 using System.Security.Claims;
 
 namespace Api.Ftp;
@@ -16,7 +17,7 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
         if (string.Equals(username, "anonymous", StringComparison.OrdinalIgnoreCase))
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var hasAnonymous = await db.DataSources.AnyAsync(d => d.FrontendFtpAllowAnonymous);
+            var hasAnonymous = await db.DataSources.AnyAsync(d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous));
             if (!hasAnonymous)
                 return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
 

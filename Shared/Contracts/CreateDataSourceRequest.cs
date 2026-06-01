@@ -1,15 +1,21 @@
+using Shared.Models;
+
 namespace Shared.Contracts;
 
 public record CreateDataSourceRequest(
     string Name,
-    string EncryptionMethod = "aes-ctr-256",
-    string BackendFtpHost = "",
-    int BackendFtpPort = 21,
-    string BackendFtpUsername = "",
-    string BackendFtpPassword = "",
-    string BackendFtpBasePath = "/",
-    bool BackendFtpUseSsl = false,
-    bool FrontendFtpEnabled = false,
-    bool FrontendFtpAllowAnonymous = false,
-    bool FrontendHttpEnabled = false,
-    bool FrontendHttpAllowAnonymous = false);
+    BackendRequest Backend,
+    List<FrontendRequest> Frontends);
+
+public record BackendRequest(
+    string Host = "",
+    int Port = 21,
+    string Username = "",
+    string Password = "",
+    string BasePath = "/",
+    bool UseSsl = false,
+    EncryptionMethod EncryptionMethod = EncryptionMethod.AesCtr256);
+
+public record FrontendRequest(
+    FrontendType Type,
+    bool AllowAnonymous = false);

@@ -25,8 +25,8 @@ public sealed class DataSourcesController(IDataSourceService dataSourceService) 
         if (string.IsNullOrWhiteSpace(req.Name))
             return BadRequest("Data source name is required.");
 
-        if (string.IsNullOrWhiteSpace(req.BackendFtpHost))
-            return BadRequest("Backend FTP host is required.");
+        if (string.IsNullOrWhiteSpace(req.Backend.Host))
+            return BadRequest("Backend host is required.");
 
         if (await dataSourceService.ExistsByNameAsync(CurrentUserId, req.Name))
             return Conflict($"Data source '{req.Name}' already exists.");
@@ -41,8 +41,8 @@ public sealed class DataSourcesController(IDataSourceService dataSourceService) 
         if (string.IsNullOrWhiteSpace(req.Name))
             return BadRequest("Data source name is required.");
 
-        if (string.IsNullOrWhiteSpace(req.BackendFtpHost))
-            return BadRequest("Backend FTP host is required.");
+        if (string.IsNullOrWhiteSpace(req.Backend.Host))
+            return BadRequest("Backend host is required.");
 
         var updated = await dataSourceService.UpdateAsync(id, CurrentUserId, req);
         return updated ? NoContent() : NotFound();

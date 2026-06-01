@@ -27,7 +27,7 @@ public sealed class FileStorageService(
             throw new UnauthorizedAccessException("Data source does not belong to the user.");
 
         var ds = dataSources.First();
-        var encryption = encryptionFactory.GetProvider(ds.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var user = await userManager.FindByIdAsync(userId.ToString())
             ?? throw new InvalidOperationException("User not found.");
 
@@ -76,7 +76,7 @@ public sealed class FileStorageService(
             throw new InvalidOperationException("Data source not found.");
 
         var ds = dataSources.First();
-        var encryption = encryptionFactory.GetProvider(ds.EncryptionMethod);
+        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var iv = Convert.FromBase64String(file.IvBase64);
         var connection = ds.ToBackendConnectionInfo();
         var fileStream = await storage.OpenReadAsync(connection, file.StoragePath);
