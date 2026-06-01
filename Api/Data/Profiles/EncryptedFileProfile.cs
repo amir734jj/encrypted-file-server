@@ -7,6 +7,6 @@ public class EncryptedFileProfile : EntityProfile<EncryptedFile>
 {
     public EncryptedFileProfile()
     {
-        MapAll();
+        MapAll(f => f.User!, f => f.DataSource!);
     }
 }

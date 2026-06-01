@@ -14,7 +14,7 @@ RUN dotnet publish UI/UI.csproj -c Release -o /app/ui-publish
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl krb5-libs
 
 COPY --from=build /app/publish .
 COPY --from=build /app/ui-publish/wwwroot ./wwwroot

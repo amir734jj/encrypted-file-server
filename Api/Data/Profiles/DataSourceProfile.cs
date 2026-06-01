@@ -7,6 +7,6 @@ public class DataSourceProfile : EntityProfile<DataSource>
 {
     public DataSourceProfile()
     {
-        MapAll();
+        MapAll(d => d.Backend, d => d.Frontends, d => d.User!);
     }
 }
