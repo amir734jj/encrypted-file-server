@@ -1,86 +1,92 @@
-using FluentFTP;
+using Renci.SshNet;
 using Shared.Contracts;
 using Shared.Interfaces;
 
 namespace Api.Services.Backend;
 
 /// <summary>
-/// Stores encrypted file blobs on a remote FTP server via FluentFTP.
+/// Stores encrypted file blobs on a remote SFTP server via SSH.NET.
 /// Each call receives per-datasource connection info.
 /// </summary>
-public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider> logger) : IBackendStorageProvider
+public sealed class SftpBackendStorageProvider : IBackendStorageProvider
 {
-    public string ProviderKey => "ftp-client";
-    public BackendStorageType StorageType => BackendStorageType.FtpClient;
+    public string ProviderKey => "sftp-client";
+    public BackendStorageType StorageType => BackendStorageType.SftpClient;
 
     public async Task<(Stream stream, string storagePath)> OpenWriteAsync(
         BackendConnectionInfo connection, string relativePath, CancellationToken ct = default)
     {
         var storagePath = $"{connection.BasePath.TrimEnd('/')}/{relativePath}";
-        var client = await ConnectAsync(connection, ct);
+        var client = Connect(connection);
 
         var dir = Path.GetDirectoryName(storagePath)?.Replace('\\', '/');
-        if (!string.IsNullOrEmpty(dir) && !await client.DirectoryExists(dir, ct))
-            await client.CreateDirectory(dir, ct);
+        if (!string.IsNullOrEmpty(dir))
+            EnsureDirectoryExists(client, dir);
 
-        var stream = await client.OpenWrite(storagePath, token: ct);
-        return (new FtpWriteStream(stream, client), storagePath);
+        var stream = client.OpenWrite(storagePath);
+        return (new SftpWriteStream(stream, client), storagePath);
     }
 
-    public async Task<Stream> OpenReadAsync(
+    public Task<Stream> OpenReadAsync(
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {
-        var client = await ConnectAsync(connection, ct);
-        var stream = await client.OpenRead(storagePath, token: ct);
-        return new FtpReadStream(stream, client);
+        var client = Connect(connection);
+        var stream = client.OpenRead(storagePath);
+        return Task.FromResult<Stream>(new SftpReadStream(stream, client));
     }
 
-    public async Task<bool> DeleteAsync(
+    public Task<bool> DeleteAsync(
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {
-        using var client = await ConnectAsync(connection, ct);
-        if (!await client.FileExists(storagePath, ct))
-            return false;
+        using var client = Connect(connection);
+        if (!client.Exists(storagePath))
+            return Task.FromResult(false);
 
-        await client.DeleteFile(storagePath, ct);
-        return true;
+        client.DeleteFile(storagePath);
+        return Task.FromResult(true);
     }
 
-    public async Task<bool> ExistsAsync(
+    public Task<bool> ExistsAsync(
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {
-        using var client = await ConnectAsync(connection, ct);
-        return await client.FileExists(storagePath, ct);
+        using var client = Connect(connection);
+        return Task.FromResult(client.Exists(storagePath));
     }
 
-    public async Task<string> RenameAsync(
+    public Task<string> RenameAsync(
         BackendConnectionInfo connection, string oldStoragePath, string newRelativePath, CancellationToken ct = default)
     {
         var newStoragePath = $"{connection.BasePath.TrimEnd('/')}/{newRelativePath}";
-        using var client = await ConnectAsync(connection, ct);
+        using var client = Connect(connection);
 
         var dir = Path.GetDirectoryName(newStoragePath)?.Replace('\\', '/');
-        if (!string.IsNullOrEmpty(dir) && !await client.DirectoryExists(dir, ct))
-            await client.CreateDirectory(dir, ct);
+        if (!string.IsNullOrEmpty(dir))
+            EnsureDirectoryExists(client, dir);
 
-        await client.Rename(oldStoragePath, newStoragePath, ct);
-        return newStoragePath;
+        client.RenameFile(oldStoragePath, newStoragePath);
+        return Task.FromResult(newStoragePath);
     }
 
-    private static async Task<AsyncFtpClient> ConnectAsync(BackendConnectionInfo connection, CancellationToken ct)
+    private static SftpClient Connect(BackendConnectionInfo connection)
     {
-        var client = new AsyncFtpClient(connection.Host, connection.Username, connection.Password, connection.Port);
-        if (connection.UseSsl)
-        {
-            client.Config.EncryptionMode = FtpEncryptionMode.Explicit;
-            client.Config.ValidateAnyCertificate = true;
-        }
-        await client.Connect(ct);
+        var client = new SftpClient(connection.Host, connection.Port, connection.Username, connection.Password);
+        client.Connect();
         return client;
     }
 
-    /// <summary>Wraps an FTP write stream so the client is disposed after writing.</summary>
-    private sealed class FtpWriteStream(Stream inner, AsyncFtpClient client) : Stream
+    private static void EnsureDirectoryExists(SftpClient client, string path)
+    {
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var current = "";
+        foreach (var part in parts)
+        {
+            current += $"/{part}";
+            if (!client.Exists(current))
+                client.CreateDirectory(current);
+        }
+    }
+
+    private sealed class SftpWriteStream(Stream inner, SftpClient client) : Stream
     {
         public override bool CanRead => false;
         public override bool CanSeek => false;
@@ -114,8 +120,7 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         }
     }
 
-    /// <summary>Wraps an FTP read stream so the client is disposed after reading.</summary>
-    private sealed class FtpReadStream(Stream inner, AsyncFtpClient client) : Stream
+    private sealed class SftpReadStream(Stream inner, SftpClient client) : Stream
     {
         public override bool CanRead => true;
         public override bool CanSeek => inner.CanSeek;

@@ -1,3 +1,5 @@
+using Shared.Contracts;
+
 namespace Shared.Interfaces;
 
 /// <summary>
@@ -6,8 +8,11 @@ namespace Shared.Interfaces;
 /// </summary>
 public interface IBackendStorageProvider
 {
-    /// <summary>Unique key identifying this provider (e.g. "ftp-client", "s3").</summary>
+    /// <summary>Unique key identifying this provider (e.g. "ftp-client", "sftp-client").</summary>
     string ProviderKey { get; }
+
+    /// <summary>The backend storage type this provider handles.</summary>
+    BackendStorageType StorageType { get; }
 
     /// <summary>Opens a writable stream to a storage location on the remote backend.</summary>
     Task<(Stream stream, string storagePath)> OpenWriteAsync(BackendConnectionInfo connection, string relativePath, CancellationToken ct = default);
@@ -34,4 +39,5 @@ public record BackendConnectionInfo(
     string Username,
     string Password,
     string BasePath,
-    bool UseSsl);
+    bool UseSsl,
+    BackendStorageType Protocol = BackendStorageType.FtpClient);

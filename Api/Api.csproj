@@ -22,6 +22,7 @@
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
         <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
         <PackageReference Include="SimpleEfCoreRepository" Version="3.1.23" />
+        <PackageReference Include="SSH.NET" Version="2025.1.0" />
         <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.0" />
         <PackageReference Include="FubarDev.FtpServer" Version="3.1.2" />
         <PackageReference Include="FubarDev.FtpServer.Abstractions" Version="3.1.2" />

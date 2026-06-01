@@ -1,9 +1,11 @@
+using Shared.Contracts;
 using Shared.Models;
 
 namespace Api.Data.Entities;
 
 public sealed class BackendConfig
 {
+    public BackendStorageType Protocol { get; set; } = BackendStorageType.FtpClient;
     public string Host { get; set; } = string.Empty;
     public int Port { get; set; } = 21;
     public string Username { get; set; } = string.Empty;

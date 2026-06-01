@@ -1,6 +1,7 @@
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using Api.Services.Backend;
 using EfCoreRepository.Interfaces;
 using Shared.Interfaces;
 using Shared.Models;
@@ -11,7 +12,7 @@ namespace Api.Services;
 public sealed class FileStorageService(
     IEfRepository repository,
     IEncryptionProviderFactory encryptionFactory,
-    IBackendStorageProvider storage) : IFileStorageService
+    IBackendStorageProviderFactory storageFactory) : IFileStorageService
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
@@ -34,6 +35,7 @@ public sealed class FileStorageService(
         var connection = ds.ToBackendConnectionInfo();
         var relativePath = isNone ? fileName : $"{fileId}.enc";
 
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, relativePath);
 
         byte[] iv;
@@ -83,6 +85,7 @@ public sealed class FileStorageService(
         var connection = ds.ToBackendConnectionInfo();
         var relativePath = isNone ? fileName : $"{fileId}.enc";
 
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, relativePath);
         var (cryptoStream, iv) = encryption.CreateEncryptingStream(destinationStream, masterKey);
 
@@ -118,6 +121,7 @@ public sealed class FileStorageService(
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var iv = Convert.FromBase64String(file.IvBase64);
         var connection = ds.ToBackendConnectionInfo();
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var fileStream = await storage.OpenReadAsync(connection, file.StoragePath);
         return encryption.CreateDecryptingStream(fileStream, masterKey, iv);
     }
@@ -131,7 +135,9 @@ public sealed class FileStorageService(
 
         if (dataSources.Count > 0)
         {
-            var connection = dataSources.First().ToBackendConnectionInfo();
+            var ds = dataSources.First();
+            var connection = ds.ToBackendConnectionInfo();
+            var storage = storageFactory.GetProvider(ds.Backend.Protocol);
             await storage.DeleteAsync(connection, file.StoragePath);
         }
 

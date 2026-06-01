@@ -1,4 +1,5 @@
 @page "/datasources"
+@using Shared.Contracts
 @using Shared.Models
 @inject ApiService Api
 @inject AuthService Auth
@@ -46,7 +47,7 @@ else
                         <p class="card-text text-muted mb-1">
                             @ds.FileCount file(s) - @FormatBytes(ds.TotalFileSize)
                         </p>
-                        <small class="text-muted d-block">Backend: @ds.Backend.Host:@ds.Backend.Port</small>
+                        <small class="text-muted d-block">@(ds.Backend.Protocol == BackendStorageType.SftpClient ? "SFTP" : "FTP"): @ds.Backend.Host:@ds.Backend.Port</small>
                         @foreach (var fe in ds.Frontends)
                         {
                             var badgeClass = fe.Type == FrontendType.Ftp ? "bg-info" : "bg-success";
@@ -93,9 +94,24 @@ else
             }
         </div>
 
-        <h6 class="text-muted mb-2 mt-4">Backend FTP Server</h6>
+        <h6 class="text-muted mb-2 mt-4">Backend Storage Server</h6>
+        <div class="mb-3">
+            <label class="form-label">Protocol</label>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="backendProtocol"
+                       id="proto-ftp" checked="@(_backendProtocol == BackendStorageType.FtpClient)"
+                       @onchange="() => SetProtocol(BackendStorageType.FtpClient)" />
+                <label class="form-check-label" for="proto-ftp">FTP</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="backendProtocol"
+                       id="proto-sftp" checked="@(_backendProtocol == BackendStorageType.SftpClient)"
+                       @onchange="() => SetProtocol(BackendStorageType.SftpClient)" />
+                <label class="form-check-label" for="proto-sftp">SFTP</label>
+            </div>
+        </div>
         <div class="row g-2 mb-3">
-            <div class="col-8"><HxInputText Label="Host" @bind-Value="_backendHost" Placeholder="ftp.example.com" /></div>
+            <div class="col-8"><HxInputText Label="Host" @bind-Value="_backendHost" Placeholder="@(_backendProtocol == BackendStorageType.SftpClient ? "sftp.example.com" : "ftp.example.com")" /></div>
             <div class="col-4"><HxInputNumber Label="Port" @bind-Value="_backendPort" /></div>
         </div>
         <div class="row g-2 mb-3">
@@ -158,6 +174,7 @@ else
 
     // Form fields
     private string _name = string.Empty;
+    private BackendStorageType _backendProtocol = BackendStorageType.FtpClient;
     private string _backendHost = string.Empty;
     private int _backendPort = 21;
     private string _backendUser = string.Empty;
@@ -196,6 +213,7 @@ else
     {
         _editId = null;
         _name = string.Empty;
+        _backendProtocol = BackendStorageType.FtpClient;
         _backendHost = string.Empty;
         _backendPort = 21;
         _backendUser = string.Empty;
@@ -217,6 +235,7 @@ else
     {
         _editId = ds.Id;
         _name = ds.Name;
+        _backendProtocol = ds.Backend.Protocol;
         _backendHost = ds.Backend.Host;
         _backendPort = ds.Backend.Port;
         _backendUser = ds.Backend.Username;
@@ -241,11 +260,21 @@ else
         !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_backendHost)
         && !string.IsNullOrWhiteSpace(_masterPassword);
 
+    private void SetProtocol(BackendStorageType protocol)
+    {
+        // Auto-switch default port when toggling protocol
+        if (_backendProtocol == BackendStorageType.FtpClient && _backendPort == 21)
+            _backendPort = 22;
+        else if (_backendProtocol == BackendStorageType.SftpClient && _backendPort == 22)
+            _backendPort = 21;
+        _backendProtocol = protocol;
+    }
+
     private async Task SaveDataSource()
     {
         try
         {
-            var backend = new BackendRequest(_backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl, _encryptionMethod, _masterPassword);
+            var backend = new BackendRequest(_backendProtocol, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl, _encryptionMethod, _masterPassword);
             var frontends = new List<FrontendRequest>();
             if (_ftpEnabled) frontends.Add(new FrontendRequest(FrontendType.Ftp, _ftpAnon));
             if (_httpEnabled) frontends.Add(new FrontendRequest(FrontendType.Http, _httpAnon));

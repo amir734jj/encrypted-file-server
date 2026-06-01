@@ -6,6 +6,5 @@ namespace Shared.Contracts;
 public enum BackendStorageType
 {
     FtpClient = 0,
-    // S3 = 1,
-    // AzureBlob = 2,
+    SftpClient = 1,
 }

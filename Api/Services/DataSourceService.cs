@@ -52,6 +52,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             Name = req.Name.Trim(),
             Backend = new BackendConfig
             {
+                Protocol = req.Backend.Protocol,
                 Host = req.Backend.Host,
                 Port = req.Backend.Port,
                 Username = req.Backend.Username,
@@ -79,6 +80,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         await Dal.Update(id, ds =>
         {
             ds.Name = req.Name.Trim();
+            ds.Backend.Protocol = req.Backend.Protocol;
             ds.Backend.Host = req.Backend.Host;
             ds.Backend.Port = req.Backend.Port;
             ds.Backend.Username = req.Backend.Username;
@@ -137,7 +139,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
 
     private static DataSourceDto ToDto(DataSource d, long totalSize, int fileCount) =>
         new(d.Id, d.Name, totalSize, fileCount, d.CreatedAt,
-            new BackendDto(d.Backend.Host, d.Backend.Port, d.Backend.Username,
+            new BackendDto(d.Backend.Protocol, d.Backend.Host, d.Backend.Port, d.Backend.Username,
                 d.Backend.BasePath, d.Backend.UseSsl, d.Backend.EncryptionMethod),
             d.Frontends.Select(f => new FrontendDto(f.Type, f.AllowAnonymous)).ToList());
 }

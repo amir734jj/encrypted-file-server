@@ -18,6 +18,10 @@ public sealed class DataSourceMapping : IEntityTypeConfiguration<DataSource>
 
         builder.OwnsOne(d => d.Backend, b =>
         {
+            b.Property(x => x.Protocol)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .HasColumnName("BackendProtocol");
             b.Property(x => x.Host).HasMaxLength(500).IsRequired().HasColumnName("BackendHost");
             b.Property(x => x.Port).HasColumnName("BackendPort");
             b.Property(x => x.Username).HasMaxLength(200).HasColumnName("BackendUsername");

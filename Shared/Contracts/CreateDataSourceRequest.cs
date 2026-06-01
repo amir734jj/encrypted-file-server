@@ -8,6 +8,7 @@ public record CreateDataSourceRequest(
     List<FrontendRequest> Frontends);
 
 public record BackendRequest(
+    BackendStorageType Protocol = BackendStorageType.FtpClient,
     string Host = "",
     int Port = 21,
     string Username = "",

@@ -3,6 +3,7 @@ using Api.Data;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using Api.Services.Backend;
 using FubarDev.FtpServer;
 using FubarDev.FtpServer.AccountManagement;
 using FubarDev.FtpServer.BackgroundTransfer;
@@ -38,7 +39,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly IEncryptionProviderFactory _encryptionFactory;
-    private readonly IBackendStorageProvider _backendStorage;
+    private readonly IBackendStorageProviderFactory _backendStorageFactory;
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
 
     public EncryptedUnixFileSystem(IServiceScope scope, Guid? userId)
@@ -48,7 +49,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
-        _backendStorage = scope.ServiceProvider.GetRequiredService<IBackendStorageProvider>();
+        _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
 
         Root = new VirtualDirectoryEntry("/", null, null);
     }
@@ -347,7 +348,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
             {
                 var connection = ds.ToBackendConnectionInfo();
-                vfe.EncryptedFile.StoragePath = await _backendStorage.RenameAsync(connection, vfe.EncryptedFile.StoragePath, newFullPath, ct);
+                vfe.EncryptedFile.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, vfe.EncryptedFile.StoragePath, newFullPath, ct);
             }
 
             await _db.SaveChangesAsync(ct);
@@ -388,7 +389,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
                 if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
                 {
                     var connection = ds.ToBackendConnectionInfo();
-                    f.StoragePath = await _backendStorage.RenameAsync(connection, f.StoragePath, newFullPath, ct);
+                    f.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, f.StoragePath, newFullPath, ct);
                 }
             }
 

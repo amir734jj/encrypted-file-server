@@ -5,6 +5,7 @@ using Api.Data;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using Api.Services.Backend;
 using FxSsh;
 using FxSsh.Services;
 using Microsoft.EntityFrameworkCore;
@@ -66,7 +67,7 @@ public sealed class SftpSubsystem : IDisposable
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly IEncryptionProviderFactory _encryptionFactory;
-    private readonly IBackendStorageProvider _backendStorage;
+    private readonly IBackendStorageProviderFactory _backendStorageFactory;
     private readonly Dictionary<string, object> _handles = new();
     private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
@@ -87,7 +88,7 @@ public sealed class SftpSubsystem : IDisposable
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
-        _backendStorage = scope.ServiceProvider.GetRequiredService<IBackendStorageProvider>();
+        _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
     }
 
     public void Start()
@@ -571,7 +572,7 @@ public sealed class SftpSubsystem : IDisposable
         if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
         {
             var connection = ds.ToBackendConnectionInfo();
-            file.StoragePath = await _backendStorage.RenameAsync(connection, file.StoragePath, newParts[1]);
+            file.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, file.StoragePath, newParts[1]);
         }
 
         await _db.SaveChangesAsync();

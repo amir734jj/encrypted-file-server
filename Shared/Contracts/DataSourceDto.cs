@@ -12,6 +12,7 @@ public record DataSourceDto(
     List<FrontendDto> Frontends);
 
 public record BackendDto(
+    BackendStorageType Protocol,
     string Host,
     int Port,
     string Username,
