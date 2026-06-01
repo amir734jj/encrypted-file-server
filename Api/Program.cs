@@ -181,6 +181,17 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.EnsureCreatedAsync();
+
+    // Patch columns that EnsureCreated won't add to an existing database
+    var patches = new[]
+    {
+        "ALTER TABLE \"DataSources\" ADD COLUMN IF NOT EXISTS \"BackendProtocol\" varchar(20) NOT NULL DEFAULT 'FtpClient'",
+    };
+    foreach (var sql in patches)
+    {
+        try { await db.Database.ExecuteSqlRawAsync(sql); }
+        catch { /* column already exists */ }
+    }
 }
 
 using (var configScope = app.Services.CreateScope())
