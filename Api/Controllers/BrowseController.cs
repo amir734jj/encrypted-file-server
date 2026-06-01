@@ -45,16 +45,17 @@ public sealed class BrowseController(
             project: d => d)).Where(d => d.HasFrontend(FrontendType.Http)).OrderBy(d => d.Name).ToList();
 
         return Content(RenderDirectoryPage("/ - File Server", "/browse",
-            dataSources.Select(ds => (ds.Name, $"/browse/{ds.Id}/", (long?)null, (DateTimeOffset?)ds.CreatedAt))), "text/html");
+            dataSources.Select(ds => (ds.Name, $"/browse/{ds.Id}/", (string?)null, (long?)null, (DateTimeOffset?)ds.CreatedAt))), "text/html");
     }
 
     [HttpGet("{dataSourceId:guid}/{**path}")]
-    public async Task<IActionResult> ListOrDownload(Guid dataSourceId, string? path = null)
+    public async Task<IActionResult> ListOrDownload(Guid dataSourceId, string? path = null, [FromQuery] bool raw = false)
     {
         var (ds, masterKey, error) = await AuthorizeDataSource(dataSourceId);
         if (error is not null) return error;
 
         var encryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
+        var isEncrypted = ds.Backend.EncryptionMethod != EncryptionMethod.None;
         path = NormalizePath(path);
 
         // If path ends with a GUID, try to serve it as a file download
@@ -67,6 +68,14 @@ public sealed class BrowseController(
             if (matchFiles.Count > 0)
             {
                 var file = matchFiles.First();
+
+                if (raw && isEncrypted)
+                {
+                    var rawStream = await fileStorage.OpenRawStreamAsync(file);
+                    var rawFileName = System.IO.Path.GetFileName(file.StoragePath);
+                    return File(rawStream, "application/octet-stream", rawFileName);
+                }
+
                 var iv = Convert.FromBase64String(file.IvBase64);
                 var fullPath = encryption.DecryptString(file.OriginalFileName, masterKey!, iv);
                 var fileName = System.IO.Path.GetFileName(fullPath);
@@ -83,7 +92,7 @@ public sealed class BrowseController(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
             project: f => f)).ToList();
 
-        var entries = new List<(string Name, string Href, long? Size, DateTimeOffset? Modified)>();
+        var entries = new List<(string Name, string Href, string? RawHref, long? Size, DateTimeOffset? Modified)>();
         var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var f in allFiles)
@@ -99,13 +108,15 @@ public sealed class BrowseController(
 
             if (slashIndex < 0)
             {
-                entries.Add((relativePath, $"/browse/{dataSourceId}/{path}{f.Id}", f.OriginalFileSize, f.CreatedAt));
+                var href = $"/browse/{dataSourceId}/{path}{f.Id}";
+                var rawHref = isEncrypted ? $"{href}?raw=true" : null;
+                entries.Add((relativePath, href, rawHref, f.OriginalFileSize, f.CreatedAt));
             }
             else
             {
                 var folderName = relativePath[..slashIndex];
                 if (seenFolders.Add(folderName))
-                    entries.Add((folderName, $"/browse/{dataSourceId}/{path}{folderName}/", null, null));
+                    entries.Add((folderName, $"/browse/{dataSourceId}/{path}{folderName}/", null, null, null));
             }
         }
 
@@ -224,7 +235,7 @@ public sealed class BrowseController(
     }
 
     private static string RenderDirectoryPage(string title, string currentPath,
-        IEnumerable<(string Name, string Href, long? Size, DateTimeOffset? Modified)> entries,
+        IEnumerable<(string Name, string Href, string? RawHref, long? Size, DateTimeOffset? Modified)> entries,
         string? parentHref = null)
     {
         var sb = new StringBuilder();
@@ -252,6 +263,9 @@ public sealed class BrowseController(
         sb.AppendLine(".header { display: flex; justify-content: space-between; align-items: center; }");
         sb.AppendLine(".theme-btn { background: none; border: 1px solid var(--border); color: var(--text); cursor: pointer; padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 0.85em; }");
         sb.AppendLine(".theme-btn:hover { background: var(--bg-hover); }");
+        sb.AppendLine(".raw { color: var(--muted); font-size: 0.85em; }");
+        sb.AppendLine(".raw a { color: var(--muted); }");
+        sb.AppendLine(".raw a:hover { color: var(--link); }");
         sb.AppendLine("</style>");
         sb.AppendLine("</head><body>");
         sb.AppendLine("<div class=\"header\">");
@@ -259,20 +273,26 @@ public sealed class BrowseController(
         sb.AppendLine("<button class=\"theme-btn\" onclick=\"toggleTheme()\" id=\"themeBtn\">☀️ Light</button>");
         sb.AppendLine("</div>");
         sb.AppendLine("<table>");
-        sb.AppendLine("<tr><th>Name</th><th class=\"size\">Size</th><th class=\"date\">Modified</th></tr>");
+        var hasAnyRaw = entries.Any(e => e.RawHref is not null);
+        var rawHeader = hasAnyRaw ? "<th class=\"raw\">Raw</th>" : "";
+        sb.AppendLine($"<tr><th>Name</th><th class=\"size\">Size</th><th class=\"date\">Modified</th>{rawHeader}</tr>");
 
         if (parentHref is not null)
         {
-            sb.AppendLine($"<tr><td><a href=\"{parentHref}\">../</a></td><td class=\"size\">-</td><td class=\"date\">-</td></tr>");
+            var rawCell = hasAnyRaw ? "<td class=\"raw\"></td>" : "";
+            sb.AppendLine($"<tr><td><a href=\"{parentHref}\">../</a></td><td class=\"size\">-</td><td class=\"date\">-</td>{rawCell}</tr>");
         }
 
-        foreach (var (name, href, size, modified) in entries)
+        foreach (var (name, href, rawHref, size, modified) in entries)
         {
             var isDir = href.EndsWith('/');
             var displayName = isDir ? $"{HttpUtility.HtmlEncode(name)}/" : HttpUtility.HtmlEncode(name);
             var sizeStr = size.HasValue ? FormatSize(size.Value) : "-";
             var dateStr = modified.HasValue ? modified.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm") : "-";
-            sb.AppendLine($"<tr><td><a href=\"{href}\">{displayName}</a></td><td class=\"size\">{sizeStr}</td><td class=\"date\">{dateStr}</td></tr>");
+            var rawCell = hasAnyRaw
+                ? $"<td class=\"raw\">{(rawHref is not null ? $"<a href=\"{rawHref}\" title=\"Download raw encrypted file\">raw</a>" : "")}</td>"
+                : "";
+            sb.AppendLine($"<tr><td><a href=\"{href}\">{displayName}</a></td><td class=\"size\">{sizeStr}</td><td class=\"date\">{dateStr}</td>{rawCell}</tr>");
         }
 
         sb.AppendLine("</table>");

@@ -126,6 +126,21 @@ public sealed class FileStorageService(
         return encryption.CreateDecryptingStream(fileStream, masterKey, iv);
     }
 
+    public async Task<Stream> OpenRawStreamAsync(EncryptedFile file)
+    {
+        var dataSources = (await DataSourceDal.GetAll(
+            filterExprs: [d => d.Id == file.DataSourceId],
+            project: d => d,
+            maxResults: 1)).ToList();
+        if (dataSources.Count == 0)
+            throw new InvalidOperationException("Data source not found.");
+
+        var ds = dataSources.First();
+        var connection = ds.ToBackendConnectionInfo();
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
+        return await storage.OpenReadAsync(connection, file.StoragePath);
+    }
+
     public async Task<bool> DeleteFileAsync(EncryptedFile file)
     {
         var dataSources = (await DataSourceDal.GetAll(
