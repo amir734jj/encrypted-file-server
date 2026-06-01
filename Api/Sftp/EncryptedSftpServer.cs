@@ -26,7 +26,7 @@ public sealed class EncryptedSftpServer : IDisposable
         var port = config.GetValue("Sftp:Port", 2222);
         var hostKey = LoadOrGenerateHostKey();
 
-        _server = new SshServer(new StartingInfo(System.Net.IPAddress.IPv6Any, port, "EncryptedFileServer"));
+        _server = new SshServer(new StartingInfo(System.Net.IPAddress.IPv6Any, port, "SSH-2.0-EncryptedFileServer"));
         _server.AddHostKey("rsa-sha2-256", hostKey);
         _server.AddHostKey("rsa-sha2-512", hostKey);
         _server.ConnectionAccepted += OnConnectionAccepted;
