@@ -9,7 +9,9 @@ RUN dotnet publish Api/Api.csproj -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache krb5-libs
+RUN apk add --no-cache krb5-libs icu-libs icu-data-full
+
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 
 COPY --from=build /app/publish .
 
