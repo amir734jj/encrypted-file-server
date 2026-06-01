@@ -220,6 +220,9 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             {
                 return new VirtualDirectoryEntry(name, dsId, candidatePath);
             }
+
+            // Return null for unknown names — this ensures STOR for new files
+            // works correctly. Use MKD to create directories before CWD.
         }
 
         return null;
