@@ -246,6 +246,56 @@ app.MapGet("/api/diagnostics/ftp-state", (IServiceProvider sp) =>
     });
 }).AllowAnonymous();
 
+// Diagnostic: deep FTP connection test
+app.MapGet("/api/diagnostics/ftp-deep", async (IServiceProvider sp) =>
+{
+    var port = app.Configuration.GetValue("Ftp:Port", 2121);
+    var ftpServer = sp.GetService<FubarDev.FtpServer.IFtpServer>() as FubarDev.FtpServer.FtpServer;
+    var results = new Dictionary<string, object>
+    {
+        ["port"] = port,
+        ["statusBefore"] = ftpServer?.Status.ToString() ?? "null",
+        ["connectionsBefore"] = ftpServer?.GetConnections().Count() ?? -1,
+    };
+
+    try
+    {
+        using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var client = new System.Net.Sockets.TcpClient();
+        await client.ConnectAsync(System.Net.IPAddress.Loopback, port, connectCts.Token);
+        results["tcpConnect"] = "success";
+
+        // Wait for FubarDev to process the connection
+        await Task.Delay(1000);
+        results["connectionsAfter"] = ftpServer?.GetConnections().Count() ?? -1;
+        results["statusAfter"] = ftpServer?.Status.ToString() ?? "null";
+
+        // Try to read banner
+        try
+        {
+            using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var stream = client.GetStream();
+            var buffer = new byte[512];
+            var bytesRead = await stream.ReadAsync(buffer, readCts.Token);
+            results["banner"] = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead);
+        }
+        catch (OperationCanceledException)
+        {
+            results["banner"] = "TIMEOUT";
+        }
+        catch (Exception ex)
+        {
+            results["bannerError"] = $"{ex.GetType().Name}: {ex.Message}";
+        }
+    }
+    catch (Exception ex)
+    {
+        results["tcpConnect"] = $"FAILED: {ex.GetType().Name}: {ex.Message}";
+    }
+
+    return Results.Ok(results);
+}).AllowAnonymous();
+
 // Diagnostic endpoint to check frontend server status
 app.MapGet("/api/diagnostics/frontends", (IEnumerable<IFrontendDataSource> fds) =>
     fds.Select(f => new { f.SourceKey, f.DisplayName, f.IsRunning })).AllowAnonymous();
