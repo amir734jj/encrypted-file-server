@@ -98,7 +98,8 @@ public sealed class BrowseController(
                     ? fileEncryption.DecryptString(file.ContentType, masterKey!, iv)
                     : "application/octet-stream";
                 var stream = await fileStorage.OpenDecryptedStreamAsync(file);
-                return File(stream, contentType, fileName);
+                Response.Headers.ContentDisposition = $"inline; filename=\"{fileName}\"";
+                return File(stream, contentType);
             }
         }
 
