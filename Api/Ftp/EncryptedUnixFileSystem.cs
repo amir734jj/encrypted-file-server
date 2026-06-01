@@ -499,6 +499,15 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 }));
             }
 
+            // Update session-tracked dirs
+            var oldDirs = _sessionDirs.Where(e => e.dsId == sourceDsId &&
+                e.virtualPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
+            foreach (var old in oldDirs)
+            {
+                _sessionDirs.Remove(old);
+                _sessionDirs.Add((sourceDsId, newPrefix + old.virtualPath[oldPrefix.Length..]));
+            }
+
             return new VirtualDirectoryEntry(fileName, targetDsId, newPrefix);
         }
 

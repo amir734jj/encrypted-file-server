@@ -578,20 +578,77 @@ public sealed class SftpSubsystem(
         if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
 
         var file = await FindFileAsync(ds, oldParts[1]);
-        if (file is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
-
-        // Re-encrypt the file name with the new path
-        var masterKey = GetCachedMasterKey(ds);
-        var encryption = _encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
-        var iv = Convert.FromBase64String(file.IvBase64);
-
-        file.OriginalFileName = encryption.EncryptString(newParts[1], masterKey, iv);
-
-        // For None encryption, also rename the actual file on the backend
-        if ((file.EncryptionMethod ?? ds.Backend.EncryptionMethod) == EncryptionMethod.None)
+        if (file is not null)
         {
-            var connection = ds.ToBackendConnectionInfo();
-            file.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, file.StoragePath, newParts[1]);
+            // Single file rename/move
+            var masterKey = GetCachedMasterKey(ds);
+            var encryption = _encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
+            var iv = Convert.FromBase64String(file.IvBase64);
+
+            file.OriginalFileName = encryption.EncryptString(newParts[1], masterKey, iv);
+
+            // For None encryption, also rename the actual file on the backend
+            if ((file.EncryptionMethod ?? ds.Backend.EncryptionMethod) == EncryptionMethod.None)
+            {
+                var connection = ds.ToBackendConnectionInfo();
+                file.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, file.StoragePath, newParts[1]);
+            }
+
+            await _db.SaveChangesAsync();
+            InvalidateCache();
+            SendStatus(id, SSH_FX_OK);
+            return;
+        }
+
+        // Directory rename/move — re-prefix all files under the old path
+        var oldPrefix = oldParts[1].EndsWith('/') ? oldParts[1] : oldParts[1] + "/";
+        var newPrefix = newParts[1].EndsWith('/') ? newParts[1] : newParts[1] + "/";
+
+        var masterKey2 = GetCachedMasterKey(ds);
+        var defaultMethod = ds.Backend.EncryptionMethod;
+
+        var allFiles = await _db.EncryptedFiles
+            .Where(f => f.DataSourceId == ds.Id)
+            .ToListAsync();
+
+        var moved = 0;
+        foreach (var f in allFiles)
+        {
+            string fullPath;
+            try
+            {
+                var enc = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                fullPath = enc.DecryptString(f.OriginalFileName, masterKey2, iv);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!fullPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var newFullPath = newPrefix + fullPath[oldPrefix.Length..];
+            var enc2 = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+            var iv2 = Convert.FromBase64String(f.IvBase64);
+            f.OriginalFileName = enc2.EncryptString(newFullPath, masterKey2, iv2);
+
+            if ((f.EncryptionMethod ?? defaultMethod) == EncryptionMethod.None)
+            {
+                var connection = ds.ToBackendConnectionInfo();
+                f.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, f.StoragePath, newFullPath);
+            }
+
+            moved++;
+        }
+
+        if (moved == 0)
+        {
+            SendStatus(id, SSH_FX_NO_SUCH_FILE);
+            return;
         }
 
         await _db.SaveChangesAsync();
