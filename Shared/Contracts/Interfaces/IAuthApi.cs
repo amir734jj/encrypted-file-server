@@ -13,4 +13,8 @@ public interface IAuthApi
     [Get("/api/auth/me")]
     [Headers("Authorization: Bearer")]
     Task<MeResponse> MeAsync();
+
+    [Post("/api/auth/impersonate/{userId}")]
+    [Headers("Authorization: Bearer")]
+    Task<LoginResponse> ImpersonateAsync(Guid userId);
 }

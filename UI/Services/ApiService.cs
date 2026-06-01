@@ -53,6 +53,23 @@ public sealed class ApiService(
 
     public async Task<MeResponse> GetProfileAsync() => await authApi.MeAsync();
 
+    public async Task ImpersonateAsync(Guid userId)
+    {
+        var response = await authApi.ImpersonateAsync(userId);
+        await auth.StartImpersonatingAsync(response.Token, response.Role, response.UserId);
+        try
+        {
+            var me = await authApi.MeAsync();
+            await auth.SetDisplayNameAsync(me.DisplayName);
+        }
+        catch { /* non-critical */ }
+    }
+
+    public async Task StopImpersonatingAsync()
+    {
+        await auth.StopImpersonatingAsync();
+    }
+
     public Task<List<UserDto>> GetUsersAsync() => usersApi.GetAllAsync();
     public Task ActivateUserAsync(Guid id) => usersApi.ActivateAsync(id);
     public Task DeactivateUserAsync(Guid id) => usersApi.DeactivateAsync(id);

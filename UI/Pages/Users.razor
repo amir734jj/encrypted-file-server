@@ -60,6 +60,9 @@ else
                             {
                                 @if (user.IsActive)
                                 {
+                                    <HxButton Size="ButtonSize.Small" Color="ThemeColor.Info" Outline="true" OnClick="() => ViewAs(user)">
+                                        <i class="bi bi-eye me-1"></i>View as
+                                    </HxButton>
                                     <HxButton Size="ButtonSize.Small" Color="ThemeColor.Warning" Outline="true" OnClick="() => Deactivate(user)">
                                         Deactivate
                                     </HxButton>
@@ -108,6 +111,12 @@ else
         await Api.ActivateUserAsync(user.Id);
         await LoadAsync();
         Messenger.AddInformation($"{user.Email} activated.");
+    }
+
+    private async Task ViewAs(UserDto user)
+    {
+        await Api.ImpersonateAsync(user.Id);
+        Nav.NavigateTo("/", forceLoad: true);
     }
 
     private async Task Deactivate(UserDto user)

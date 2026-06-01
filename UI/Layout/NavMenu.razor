@@ -1,6 +1,18 @@
 @inject AuthService Auth
+@inject ApiService Api
+@inject NavigationManager Nav
 
 <div class="sidebar bg-dark text-white d-flex flex-column p-3">
+    @if (Auth.IsImpersonating)
+    {
+        <div class="alert alert-warning py-2 px-3 mb-3 small">
+            <i class="bi bi-eye-fill me-1"></i>Viewing as <strong>@Auth.DisplayLabel</strong>
+            <button class="btn btn-sm btn-outline-dark d-block mt-1 w-100" @onclick="StopImpersonating">
+                Back to Admin
+            </button>
+        </div>
+    }
+
     <h5 class="mb-4">
         <i class="bi bi-shield-lock me-2"></i>Encrypted FS
     </h5>
@@ -30,3 +42,11 @@
         <i class="bi bi-info-circle me-1"></i>FTP: port 2121
     </div>
 </div>
+
+@code {
+    private async Task StopImpersonating()
+    {
+        await Api.StopImpersonatingAsync();
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+}

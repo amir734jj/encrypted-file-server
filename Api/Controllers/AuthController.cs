@@ -95,6 +95,19 @@ public sealed class AuthController(
         return Ok(new MeResponse(user.Email!, user.DisplayName));
     }
 
+    [HttpPost("impersonate/{userId:guid}")]
+    [Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> Impersonate(Guid userId)
+    {
+        var targetUser = await users.FindByIdAsync(userId.ToString());
+        if (targetUser is null) return NotFound();
+
+        var targetRoles = await users.GetRolesAsync(targetUser);
+        var role = targetRoles.FirstOrDefault() ?? Roles.User;
+
+        return Ok(new LoginResponse(BuildToken(targetUser, role), role, targetUser.Id));
+    }
+
     private string BuildToken(User user, string role)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Jwt:Key"]!));
