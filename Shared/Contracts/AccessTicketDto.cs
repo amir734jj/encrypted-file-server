@@ -3,6 +3,7 @@ namespace Shared.Contracts;
 public record AccessTicketDto(
     Guid Id,
     string Username,
+    string Password,
     DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt);
 

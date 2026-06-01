@@ -22,7 +22,7 @@ public sealed class TicketsController(IEfRepository repository) : ControllerBase
         var tickets = (await TicketDal.GetAll(
             filterExprs: [t => t.UserId == CurrentUserId && t.ExpiresAt > DateTimeOffset.UtcNow],
             orderBy: t => t.CreatedAt,
-            project: t => new AccessTicketDto(t.Id, t.Username, t.CreatedAt, t.ExpiresAt))).ToList();
+            project: t => new AccessTicketDto(t.Id, t.Username, t.Password, t.CreatedAt, t.ExpiresAt))).ToList();
 
         return Ok(tickets);
     }
