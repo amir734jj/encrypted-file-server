@@ -112,6 +112,10 @@ else
                                   Enabled="@(!_progressMap.ContainsKey(ds.Id))">
                             <i class="bi bi-shield-lock me-1"></i> Re-encrypt All
                         </HxButton>
+                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" Outline="true"
+                                  OnClick="() => DuplicateDataSource(ds)">
+                            <i class="bi bi-copy me-1"></i> Duplicate
+                        </HxButton>
                         <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)"
                                   Enabled="@(!_progressMap.ContainsKey(ds.Id))">
                             <i class="bi bi-trash me-1"></i> Delete
@@ -381,6 +385,31 @@ else
         _sftpEnabled = true;
         _sftpAnon = false;
         _encryptionMethod = EncryptionMethod.AesCtr256;
+        await _modal.ShowAsync();
+    }
+
+    private async Task DuplicateDataSource(DataSourceDto ds)
+    {
+        _editId = null;
+        _name = $"Copy of {ds.Name}";
+        _backendProtocol = ds.Backend.Protocol;
+        _backendHost = ds.Backend.Host;
+        _backendPort = ds.Backend.Port;
+        _backendUser = ds.Backend.Username;
+        _backendPass = string.Empty;
+        _backendPath = ds.Backend.BasePath;
+        _backendSsl = ds.Backend.UseSsl;
+        _encryptionMethod = ds.Backend.EncryptionMethod;
+        _masterPassword = string.Empty;
+        var ftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Ftp);
+        var httpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
+        var sftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Sftp);
+        _ftpEnabled = ftpFrontend is not null;
+        _ftpAnon = ftpFrontend?.AllowAnonymous ?? false;
+        _httpEnabled = httpFrontend is not null;
+        _httpAnon = httpFrontend?.AllowAnonymous ?? false;
+        _sftpEnabled = sftpFrontend is not null;
+        _sftpAnon = sftpFrontend?.AllowAnonymous ?? false;
         await _modal.ShowAsync();
     }
 
