@@ -178,10 +178,8 @@ public sealed class FileStorageService(
             noneEncryption, masterKey,
             newRelativePath);
 
-        // Delete old encrypted blob
-        await storage.DeleteAsync(connection, file.StoragePath);
-
-        // Update DB record in place
+        // Update DB first so we never lose track of data if delete fails
+        var oldStoragePath = file.StoragePath;
         file.StoragePath = newStoragePath;
         file.OriginalFileName = noneEncryption.EncryptString(originalFileName, masterKey, newIv);
         file.ContentType = originalContentType is not null
@@ -189,7 +187,7 @@ public sealed class FileStorageService(
         file.IvBase64 = Convert.ToBase64String(newIv);
         file.EncryptionMethod = EncryptionMethod.None;
         file.UpdatedAt = DateTimeOffset.UtcNow;
-        return await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
+        var updated = await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
         {
             existing.StoragePath = file.StoragePath;
             existing.OriginalFileName = file.OriginalFileName;
@@ -198,6 +196,11 @@ public sealed class FileStorageService(
             existing.EncryptionMethod = file.EncryptionMethod;
             existing.UpdatedAt = file.UpdatedAt;
         }));
+
+        // Safe to delete old blob now — DB already points to new one
+        await storage.DeleteAsync(connection, oldStoragePath);
+
+        return updated;
     }
 
     public async Task<EncryptedFile> ReEncryptFileAsync(EncryptedFile file, EncryptionMethod newMethod)
@@ -230,10 +233,8 @@ public sealed class FileStorageService(
             newEncryption, masterKey,
             newRelativePath);
 
-        // Delete old blob
-        await storage.DeleteAsync(connection, file.StoragePath);
-
-        // Update DB record
+        // Update DB first so we never lose track of data if delete fails
+        var oldStoragePath = file.StoragePath;
         file.StoragePath = newStoragePath;
         file.OriginalFileName = newEncryption.EncryptString(originalFileName, masterKey, newIv);
         file.ContentType = originalContentType is not null
@@ -241,7 +242,7 @@ public sealed class FileStorageService(
         file.IvBase64 = Convert.ToBase64String(newIv);
         file.EncryptionMethod = newMethod;
         file.UpdatedAt = DateTimeOffset.UtcNow;
-        return await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
+        var updated = await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
         {
             existing.StoragePath = file.StoragePath;
             existing.OriginalFileName = file.OriginalFileName;
@@ -250,6 +251,11 @@ public sealed class FileStorageService(
             existing.EncryptionMethod = file.EncryptionMethod;
             existing.UpdatedAt = file.UpdatedAt;
         }));
+
+        // Safe to delete old blob now — DB already points to new one
+        await storage.DeleteAsync(connection, oldStoragePath);
+
+        return updated;
     }
 
     /// <summary>
