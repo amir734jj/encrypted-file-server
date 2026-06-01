@@ -1,12 +1,11 @@
-using Api.Data;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
 using Api.Services.Backend;
+using EfCoreRepository.Interfaces;
 using FubarDev.FtpServer.BackgroundTransfer;
 using FubarDev.FtpServer.FileSystem;
 using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
 using Shared.Models;
 
@@ -14,12 +13,15 @@ namespace Api.Ftp;
 
 public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) : IUnixFileSystem
 {
-    private readonly AppDbContext _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    private readonly IEfRepository _repository = scope.ServiceProvider.GetRequiredService<IEfRepository>();
     private readonly IFileStorageService _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
     private readonly IEncryptionProviderFactory _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
     private readonly IBackendStorageProviderFactory _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
     private readonly HashSet<(Guid dsId, string virtualPath)> _sessionDirs = [];
+
+    private IBasicCrud<DataSource> DataSourceDal => _repository.For<DataSource>();
+    private IBasicCrud<EncryptedFile> FileDal => _repository.For<EncryptedFile>();
 
     private bool IsAnonymous => !userId.HasValue;
 
@@ -30,7 +32,10 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             return cached;
         }
 
-        var ds = await _db.DataSources.FirstAsync(d => d.Id == dataSourceId);
+        var ds = (await DataSourceDal.GetAll(
+            filterExprs: [d => d.Id == dataSourceId],
+            project: d => d,
+            maxResults: 1)).First();
         var key = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         _masterKeyCache[dataSourceId] = key;
         return key;
@@ -38,7 +43,10 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
 
     private async Task<IEncryptionProvider> GetEncryptionForDataSourceAsync(Guid dataSourceId)
     {
-        var ds = await _db.DataSources.FirstAsync(d => d.Id == dataSourceId);
+        var ds = (await DataSourceDal.GetAll(
+            filterExprs: [d => d.Id == dataSourceId],
+            project: d => d,
+            maxResults: 1)).First();
         return _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
     }
 
@@ -49,6 +57,17 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             : defaultEncryption;
         var iv = Convert.FromBase64String(f.IvBase64);
         return encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+    }
+
+    private async Task<IEnumerable<EncryptedFile>> GetFilesForDataSourceAsync(Guid dsId)
+    {
+        return userId.HasValue
+            ? await FileDal.GetAll(
+                filterExprs: [f => f.DataSourceId == dsId, f => f.UserId == userId.Value],
+                project: f => f)
+            : await FileDal.GetAll(
+                filterExprs: [f => f.DataSourceId == dsId],
+                project: f => f);
     }
 
     private void EnsureAuthenticated()
@@ -70,12 +89,12 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         if (directoryEntry is VirtualDirectoryEntry { DataSourceId: null })
         {
             var dataSources = IsAnonymous
-                ? await _db.DataSources
-                    .Where(d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous))
-                    .OrderBy(d => d.Name).ToListAsync(ct)
-                : await _db.DataSources
-                    .Where(d => d.UserId == userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp))
-                    .OrderBy(d => d.Name).ToListAsync(ct);
+                ? (await DataSourceDal.GetAll(
+                    filterExprs: [d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous)],
+                    project: d => d)).OrderBy(d => d.Name).ToList()
+                : (await DataSourceDal.GetAll(
+                    filterExprs: [d => d.UserId == userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp)],
+                    project: d => d)).OrderBy(d => d.Name).ToList();
 
             return dataSources
                 .Select(IUnixFileSystemEntry (ds) => new VirtualDirectoryEntry(ds.Name, ds.Id, ""))
@@ -86,13 +105,7 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         {
             var currentPath = vde.VirtualPath ?? "";
 
-            var query = _db.EncryptedFiles.Where(f => f.DataSourceId == dsId);
-            if (userId.HasValue)
-            {
-                query = query.Where(f => f.UserId == userId.Value);
-            }
-
-            var files = await query.ToListAsync(ct);
+            var files = (await GetFilesForDataSourceAsync(dsId)).ToList();
 
             var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
             var encryption = await GetEncryptionForDataSourceAsync(dsId);
@@ -158,10 +171,12 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         if (directoryEntry is VirtualDirectoryEntry { DataSourceId: null })
         {
             var ds = IsAnonymous
-                ? await _db.DataSources.FirstOrDefaultAsync(
-                    d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous) && d.Name == name, ct)
-                : await _db.DataSources.FirstOrDefaultAsync(
-                    d => d.UserId == userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp) && d.Name == name, ct);
+                ? (await DataSourceDal.GetAll(
+                    filterExprs: [d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous) && d.Name == name],
+                    project: d => d, maxResults: 1)).FirstOrDefault()
+                : (await DataSourceDal.GetAll(
+                    filterExprs: [d => d.UserId == userId && d.Frontends.Any(f => f.Type == FrontendType.Ftp) && d.Name == name],
+                    project: d => d, maxResults: 1)).FirstOrDefault();
             return ds is null ? null : new VirtualDirectoryEntry(ds.Name, ds.Id, "");
         }
 
@@ -169,13 +184,7 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         {
             var currentPath = vde.VirtualPath ?? "";
 
-            var query = _db.EncryptedFiles.Where(f => f.DataSourceId == dsId);
-            if (userId.HasValue)
-            {
-                query = query.Where(f => f.UserId == userId.Value);
-            }
-
-            var files = await query.ToListAsync(ct);
+            var files = (await GetFilesForDataSourceAsync(dsId)).ToList();
 
             var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
             var encryption = await GetEncryptionForDataSourceAsync(dsId);
@@ -268,7 +277,7 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             throw new InvalidOperationException("Cannot create files in the root directory. Use a data source folder.");
         }
 
-        var dsOwned = await _db.DataSources.AnyAsync(d => d.Id == dsId && d.UserId == userId, ct);
+        var dsOwned = await DataSourceDal.Any(filterExprs: [d => d.Id == dsId && d.UserId == userId]);
         if (!dsOwned)
         {
             throw new UnauthorizedAccessException("Data source does not belong to the current user.");
@@ -321,29 +330,29 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         {
             if (string.IsNullOrEmpty(vde.VirtualPath))
             {
-                var ds = await _db.DataSources.FirstOrDefaultAsync(
-                    d => d.Id == dsId && d.UserId == userId, ct);
+                var ds = (await DataSourceDal.GetAll(
+                    filterExprs: [d => d.Id == dsId && d.UserId == userId],
+                    project: d => d, maxResults: 1)).FirstOrDefault();
                 if (ds is null)
                 {
                     return;
                 }
 
-                var allFiles = await _db.EncryptedFiles
-                    .Where(f => f.DataSourceId == dsId && f.UserId == userId)
-                    .ToListAsync(ct);
+                var allFiles = (await FileDal.GetAll(
+                    filterExprs: [f => f.DataSourceId == dsId && f.UserId == userId],
+                    project: f => f)).ToList();
                 foreach (var f in allFiles)
                     await _fileStorage.DeleteFileAsync(f);
 
-                _db.DataSources.Remove(ds);
-                await _db.SaveChangesAsync(ct);
+                await DataSourceDal.Delete(ds.Id);
             }
             else
             {
                 var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
                 var encryption = await GetEncryptionForDataSourceAsync(dsId);
-                var allFiles = await _db.EncryptedFiles
-                    .Where(f => f.DataSourceId == dsId && f.UserId == userId)
-                    .ToListAsync(ct);
+                var allFiles = (await FileDal.GetAll(
+                    filterExprs: [f => f.DataSourceId == dsId && f.UserId == userId],
+                    project: f => f)).ToList();
 
                 foreach (var f in allFiles)
                 {
@@ -406,18 +415,28 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             var newFullPath = targetPath + fileName;
             var encryptedName = encryption.EncryptString(newFullPath, masterKey, iv);
 
-            vfe.EncryptedFile.OriginalFileName = encryptedName;
-            vfe.EncryptedFile.UpdatedAt = DateTimeOffset.UtcNow;
-
             // For None encryption, also rename the actual file on the backend
-            var ds = await _db.DataSources.FirstAsync(d => d.Id == targetDsId, ct);
+            var ds = (await DataSourceDal.GetAll(
+                filterExprs: [d => d.Id == targetDsId],
+                project: d => d, maxResults: 1)).First();
+            string? newStoragePath = null;
             if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
             {
                 var connection = ds.ToBackendConnectionInfo();
-                vfe.EncryptedFile.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, vfe.EncryptedFile.StoragePath, newFullPath, ct);
+                newStoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, vfe.EncryptedFile.StoragePath, newFullPath, ct);
             }
 
-            await _db.SaveChangesAsync(ct);
+            var capturedEncryptedName = encryptedName;
+            var capturedStoragePath = newStoragePath;
+            await FileDal.Update(vfe.EncryptedFile.Id, (Action<EncryptedFile>)(existing =>
+            {
+                existing.OriginalFileName = capturedEncryptedName;
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                if (capturedStoragePath is not null)
+                {
+                    existing.StoragePath = capturedStoragePath;
+                }
+            }));
 
             return new VirtualFileEntry(vfe.EncryptedFile, fileName);
         }
@@ -439,9 +458,13 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             var masterKey = await GetMasterKeyForDataSourceAsync(sourceDsId);
             var encryption = await GetEncryptionForDataSourceAsync(sourceDsId);
 
-            var allFiles = await _db.EncryptedFiles
-                .Where(f => f.DataSourceId == sourceDsId && f.UserId == userId)
-                .ToListAsync(ct);
+            var allFiles = (await FileDal.GetAll(
+                filterExprs: [f => f.DataSourceId == sourceDsId && f.UserId == userId],
+                project: f => f)).ToList();
+
+            var ds = (await DataSourceDal.GetAll(
+                filterExprs: [d => d.Id == sourceDsId],
+                project: d => d, maxResults: 1)).First();
 
             foreach (var f in allFiles)
             {
@@ -453,19 +476,29 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 }
 
                 var newFullPath = newPrefix + fullPath[oldPrefix.Length..];
-                f.OriginalFileName = encryption.EncryptString(newFullPath, masterKey, iv);
-                f.UpdatedAt = DateTimeOffset.UtcNow;
+                var encryptedName = encryption.EncryptString(newFullPath, masterKey, iv);
 
+                string? newStoragePath = null;
                 // For None encryption, also rename the actual file on the backend
-                var ds = await _db.DataSources.FirstAsync(d => d.Id == sourceDsId, ct);
                 if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
                 {
                     var connection = ds.ToBackendConnectionInfo();
-                    f.StoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, f.StoragePath, newFullPath, ct);
+                    newStoragePath = await _backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, f.StoragePath, newFullPath, ct);
                 }
+
+                var capturedEncryptedName = encryptedName;
+                var capturedStoragePath = newStoragePath;
+                await FileDal.Update(f.Id, (Action<EncryptedFile>)(existing =>
+                {
+                    existing.OriginalFileName = capturedEncryptedName;
+                    existing.UpdatedAt = DateTimeOffset.UtcNow;
+                    if (capturedStoragePath is not null)
+                    {
+                        existing.StoragePath = capturedStoragePath;
+                    }
+                }));
             }
 
-            await _db.SaveChangesAsync(ct);
             return new VirtualDirectoryEntry(fileName, targetDsId, newPrefix);
         }
 
