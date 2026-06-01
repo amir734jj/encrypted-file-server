@@ -23,10 +23,9 @@ RUN mkdir -p /app/storage
 EXPOSE 5000 2121 2222 50000-50100
 
 ENV ASPNETCORE_ENVIRONMENT=Production
-ENV PORT=5000
 ENV Storage__BasePath=/app/storage
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD curl -f http://localhost:5000/api/health || exit 1
+    CMD curl -f http://localhost:${PORT:-5000}/api/health || exit 1
 
 ENTRYPOINT ["dotnet", "Api.dll"]
