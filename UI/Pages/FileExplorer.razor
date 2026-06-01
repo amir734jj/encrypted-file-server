@@ -57,9 +57,15 @@
 
 @if (_uploading)
 {
-    <div class="alert alert-info d-flex align-items-center">
-        <div class="spinner-border spinner-border-sm me-2"></div>
-        Uploading & encrypting...
+    <div class="alert alert-info">
+        <div class="d-flex align-items-center mb-2">
+            <div class="spinner-border spinner-border-sm me-2"></div>
+            <span>Uploading file @_uploadCurrent of @_uploadTotal: <strong>@_uploadFileName</strong></span>
+        </div>
+        <div class="progress" style="height: 6px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                 style="width: @(_uploadTotal > 0 ? (int)(100.0 * _uploadCurrent / _uploadTotal) : 0)%"></div>
+        </div>
     </div>
 }
 
@@ -164,6 +170,9 @@ else
 
     private DirectoryListingDto? _listing;
     private bool _uploading;
+    private int _uploadCurrent;
+    private int _uploadTotal;
+    private string _uploadFileName = string.Empty;
     private HxModal _newFolderModal = null!;
     private string _newFolderName = string.Empty;
 
@@ -218,11 +227,17 @@ else
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
     {
+        var files = e.GetMultipleFiles(20);
         _uploading = true;
+        _uploadCurrent = 0;
+        _uploadTotal = files.Count;
         StateHasChanged();
 
-        foreach (var file in e.GetMultipleFiles(20))
+        foreach (var file in files)
         {
+            _uploadCurrent++;
+            _uploadFileName = file.Name;
+            StateHasChanged();
             try
             {
                 await using var stream = file.OpenReadStream(maxAllowedSize: 500_000_000);
@@ -238,7 +253,7 @@ else
         _uploading = false;
         await LoadAsync();
         StateHasChanged();
-        Messenger.AddInformation("Upload complete.");
+        Messenger.AddInformation($"Uploaded {_uploadTotal} file(s).");
     }
 
     private async Task DownloadFile(FileEntryDto file)
