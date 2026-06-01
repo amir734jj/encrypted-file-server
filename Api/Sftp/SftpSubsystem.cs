@@ -664,30 +664,37 @@ public sealed class SftpSubsystem(
 
         foreach (var f in files)
         {
-            var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
-
-            if (!string.IsNullOrEmpty(pathPrefix) &&
-                !fullPath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                continue;
-            }
+                var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
 
-            var relativePath = string.IsNullOrEmpty(pathPrefix) ? fullPath : fullPath[pathPrefix.Length..];
-            var slashIdx = relativePath.IndexOf('/');
-
-            if (slashIdx < 0)
-            {
-                entries.Add(new VfsEntry(relativePath, false, f.OriginalFileSize, f.CreatedAt));
-            }
-            else
-            {
-                var folderName = relativePath[..slashIdx];
-                if (seenFolders.Add(folderName))
+                if (!string.IsNullOrEmpty(pathPrefix) &&
+                    !fullPath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    entries.Add(new VfsEntry(folderName, true, 0, f.CreatedAt));
+                    continue;
                 }
+
+                var relativePath = string.IsNullOrEmpty(pathPrefix) ? fullPath : fullPath[pathPrefix.Length..];
+                var slashIdx = relativePath.IndexOf('/');
+
+                if (slashIdx < 0)
+                {
+                    entries.Add(new VfsEntry(relativePath, false, f.OriginalFileSize, f.CreatedAt));
+                }
+                else
+                {
+                    var folderName = relativePath[..slashIdx];
+                    if (seenFolders.Add(folderName))
+                    {
+                        entries.Add(new VfsEntry(folderName, true, 0, f.CreatedAt));
+                    }
+                }
+            }
+            catch
+            {
+                // Skip files that can't be decrypted
             }
         }
 
@@ -706,13 +713,20 @@ public sealed class SftpSubsystem(
         // Check for exact file match
         foreach (var f in files)
         {
-            var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
-
-            if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                return (new VfsEntry(Path.GetFileName(subPath), false, f.OriginalFileSize, f.CreatedAt), f);
+                var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+
+                if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (new VfsEntry(Path.GetFileName(subPath), false, f.OriginalFileSize, f.CreatedAt), f);
+                }
+            }
+            catch
+            {
+                continue;
             }
         }
 
@@ -720,10 +734,17 @@ public sealed class SftpSubsystem(
         var dirPrefix = subPath.EndsWith('/') ? subPath : subPath + "/";
         var isDir = files.Any(f =>
         {
-            var enc = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = enc.DecryptString(f.OriginalFileName, masterKey, iv);
-            return fullPath.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                var enc = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = enc.DecryptString(f.OriginalFileName, masterKey, iv);
+                return fullPath.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         });
 
         return isDir
@@ -742,12 +763,19 @@ public sealed class SftpSubsystem(
 
         foreach (var f in files)
         {
-            var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
-            if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                return f;
+                var encryption = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+                if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return f;
+                }
+            }
+            catch
+            {
+                continue;
             }
         }
 

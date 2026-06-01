@@ -41,15 +41,23 @@ public sealed class FilesController(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
             project: f => f)).ToList();
 
-        var decrypted = allFiles.Select(f =>
+        var decrypted = new List<(EncryptedFile file, string fullPath, string? contentType)>();
+        foreach (var f in allFiles)
         {
-            var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
-            var contentType = f.ContentType is not null
-                ? encryption.DecryptString(f.ContentType, masterKey, iv) : null;
-            return (file: f, fullPath, contentType);
-        }).ToList();
+            try
+            {
+                var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+                var contentType = f.ContentType is not null
+                    ? encryption.DecryptString(f.ContentType, masterKey, iv) : null;
+                decrypted.Add((f, fullPath, contentType));
+            }
+            catch
+            {
+                // Skip files that can't be decrypted (corrupt IV, wrong key, etc.)
+            }
+        }
 
         var files = new List<FileEntryDto>();
         var subfolders = new Dictionary<string, (int count, long size)>(StringComparer.OrdinalIgnoreCase);
@@ -218,7 +226,7 @@ public sealed class FilesController(
     private async Task<DataSource?> GetDataSource(Guid id)
     {
         var dataSources = (await DataSourceDal.GetAll(
-            filterExprs: [d => d.Id == id],
+            filterExprs: [d => d.Id == id && d.UserId == CurrentUserId],
             project: d => d,
             maxResults: 1)).ToList();
         return dataSources.FirstOrDefault();

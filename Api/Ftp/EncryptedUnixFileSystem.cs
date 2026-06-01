@@ -100,7 +100,16 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
 
             foreach (var f in files)
             {
-                var fullPath = DecryptFileName(f, masterKey, encryption);
+                string fullPath;
+                try
+                {
+                    fullPath = DecryptFileName(f, masterKey, encryption);
+                }
+                catch
+                {
+                    continue; // Skip files that can't be decrypted
+                }
+
                 if (!fullPath.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -159,7 +168,16 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             var encryption = await GetEncryptionForDataSourceAsync(dsId);
             foreach (var f in files)
             {
-                var fullPath = DecryptFileName(f, masterKey, encryption);
+                string fullPath;
+                try
+                {
+                    fullPath = DecryptFileName(f, masterKey, encryption);
+                }
+                catch
+                {
+                    continue;
+                }
+
                 if (!fullPath.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;

@@ -141,42 +141,49 @@ public sealed class BrowseController(
 
         foreach (var f in allFiles)
         {
-            var fileEncryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv = Convert.FromBase64String(f.IvBase64);
-            var fullPath = fileEncryption.DecryptString(f.OriginalFileName, masterKey!, iv);
-
-            if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                continue;
-            }
+                var fileEncryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = fileEncryption.DecryptString(f.OriginalFileName, masterKey!, iv);
 
-            var relativePath = fullPath[path.Length..];
-            var slashIndex = relativePath.IndexOf('/');
-
-            if (slashIndex < 0)
-            {
-                var isFileEncrypted = (f.EncryptionMethod ?? defaultMethod) != EncryptionMethod.None;
-                var href = $"/browse/{dataSourceId}/{path}{f.Id}";
-                entries.Add(new EntryViewModel
+                if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
                 {
-                    Name = relativePath,
-                    Href = href,
-                    RawHref = isFileEncrypted ? $"{href}?raw=true" : null,
-                    Size = f.OriginalFileSize,
-                    Modified = f.CreatedAt
-                });
-            }
-            else
-            {
-                var folderName = relativePath[..slashIndex];
-                if (seenFolders.Add(folderName))
+                    continue;
+                }
+
+                var relativePath = fullPath[path.Length..];
+                var slashIndex = relativePath.IndexOf('/');
+
+                if (slashIndex < 0)
                 {
+                    var isFileEncrypted = (f.EncryptionMethod ?? defaultMethod) != EncryptionMethod.None;
+                    var href = $"/browse/{dataSourceId}/{path}{f.Id}";
                     entries.Add(new EntryViewModel
                     {
-                        Name = folderName,
-                        Href = $"/browse/{dataSourceId}/{path}{folderName}/"
+                        Name = relativePath,
+                        Href = href,
+                        RawHref = isFileEncrypted ? $"{href}?raw=true" : null,
+                        Size = f.OriginalFileSize,
+                        Modified = f.CreatedAt
                     });
                 }
+                else
+                {
+                    var folderName = relativePath[..slashIndex];
+                    if (seenFolders.Add(folderName))
+                    {
+                        entries.Add(new EntryViewModel
+                        {
+                            Name = folderName,
+                            Href = $"/browse/{dataSourceId}/{path}{folderName}/"
+                        });
+                    }
+                }
+            }
+            catch
+            {
+                // Skip files that can't be decrypted
             }
         }
 
