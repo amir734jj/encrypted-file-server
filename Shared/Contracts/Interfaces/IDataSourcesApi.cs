@@ -29,4 +29,7 @@ public interface IDataSourcesApi
 
     [Get("/api/datasources/{id}/master-password")]
     Task<MasterPasswordResponse> GetMasterPasswordAsync(Guid id);
+
+    [Get("/api/datasources/{id}/credentials")]
+    Task<DataSourceCredentialsResponse> GetCredentialsAsync(Guid id);
 }

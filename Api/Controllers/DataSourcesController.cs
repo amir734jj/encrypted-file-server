@@ -38,6 +38,13 @@ public sealed class DataSourcesController(
         return password is not null ? Ok(new MasterPasswordResponse(password)) : NotFound();
     }
 
+    [HttpGet("{id:guid}/credentials")]
+    public async Task<IActionResult> GetCredentials(Guid id)
+    {
+        var creds = await dataSourceService.GetCredentialsAsync(id, CurrentUserId);
+        return creds is not null ? Ok(creds) : NotFound();
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {

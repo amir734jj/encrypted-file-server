@@ -88,6 +88,7 @@ public sealed class ApiService(
     public Task<BulkOperationResult> ReEncryptDataSourceAsync(Guid id, EncryptionMethod method) => dataSourcesApi.ReEncryptAllAsync(id, method);
     public Task<BulkOperationProgress?> GetDataSourceProgressAsync(Guid id) => dataSourcesApi.GetProgressAsync(id);
     public Task<MasterPasswordResponse> GetMasterPasswordAsync(Guid id) => dataSourcesApi.GetMasterPasswordAsync(id);
+    public Task<DataSourceCredentialsResponse> GetCredentialsAsync(Guid id) => dataSourcesApi.GetCredentialsAsync(id);
 
     public Task<DirectoryListingDto> GetFilesAsync(Guid dataSourceId, string path = "")
         => filesApi.GetAllAsync(dataSourceId, path);

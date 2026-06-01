@@ -401,17 +401,28 @@ else
 
     private async Task DuplicateDataSource(DataSourceDto ds)
     {
+        DataSourceCredentialsResponse? creds = null;
+        try
+        {
+            creds = await Api.GetCredentialsAsync(ds.Id);
+        }
+        catch
+        {
+            Messenger.AddError("Failed to fetch credentials for duplication.");
+            return;
+        }
+
         _editId = null;
         _name = $"Copy of {ds.Name}";
         _backendProtocol = ds.Backend.Protocol;
         _backendHost = ds.Backend.Host;
         _backendPort = ds.Backend.Port;
         _backendUser = ds.Backend.Username;
-        _backendPass = string.Empty;
+        _backendPass = creds?.BackendPassword ?? string.Empty;
         _backendPath = ds.Backend.BasePath;
         _backendSsl = ds.Backend.UseSsl;
         _encryptionMethod = ds.Backend.EncryptionMethod;
-        _masterPassword = string.Empty;
+        _masterPassword = creds?.MasterPassword ?? string.Empty;
         var ftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Ftp);
         var httpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
         var sftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Sftp);
