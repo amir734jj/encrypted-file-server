@@ -1,11 +1,12 @@
 using System.Text;
 using System.Web;
+using Api.Data;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
 using Shared.Models;
 
@@ -17,7 +18,7 @@ public sealed class BrowseController(
     IEfRepository repository,
     IFileStorageService fileStorage,
     IEncryptionProviderFactory encryptionFactory,
-    UserManager<User> users) : ControllerBase
+    AppDbContext db) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
@@ -149,7 +150,7 @@ public sealed class BrowseController(
             return (ds, masterKey, null);
         }
 
-        // HTTP Basic auth — validate against ASP.NET Identity
+        // HTTP Basic auth — validate against access tickets
         var authHeader = Request.Headers.Authorization.ToString();
         if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
@@ -159,12 +160,14 @@ public sealed class BrowseController(
             var username = colonIdx >= 0 ? decoded[..colonIdx] : decoded;
             var password = colonIdx >= 0 ? decoded[(colonIdx + 1)..] : string.Empty;
 
-            var user = await users.FindByEmailAsync(username);
-            if (user is not null && user.IsActive && user.Id == ds.UserId
-                && await users.CheckPasswordAsync(user, password))
-            {
+            var ticket = await db.AccessTickets
+                .FirstOrDefaultAsync(t => t.Username == username
+                    && t.Password == password
+                    && t.ExpiresAt > DateTimeOffset.UtcNow
+                    && t.UserId == ds.UserId);
+
+            if (ticket is not null)
                 return (ds, masterKey, null);
-            }
         }
 
         Response.Headers["WWW-Authenticate"] = $"Basic realm=\"{ds.Name}\"";

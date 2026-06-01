@@ -2,7 +2,6 @@ using Api.Data;
 using Api.Data.Entities;
 using FxSsh;
 using FxSsh.Services;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Shared.Models;
 
@@ -103,13 +102,16 @@ public sealed class EncryptedSftpServer : IDisposable
             return (hasAnon, null);
         }
 
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
-        var user = userManager.FindByEmailAsync(username).GetAwaiter().GetResult();
-        if (user is null || !user.IsActive)
+        var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var ticket = db2.AccessTickets
+            .FirstOrDefault(t => t.Username == username
+                && t.Password == password
+                && t.ExpiresAt > DateTimeOffset.UtcNow);
+
+        if (ticket is null)
             return (false, null);
 
-        var valid = userManager.CheckPasswordAsync(user, password).GetAwaiter().GetResult();
-        return (valid, valid ? user.Id : (Guid?)null);
+        return (true, ticket.UserId);
     }
 
     private static string LoadOrGenerateHostKey()

@@ -11,6 +11,7 @@ public sealed class ApiService(
     IDataSourcesApi dataSourcesApi,
     IFilesApi filesApi,
     IGlobalConfigApi globalConfigApi,
+    ITicketsApi ticketsApi,
     AuthService auth)
 {
     public async Task<string?> LoginAsync(string email, string password)
@@ -97,4 +98,8 @@ public sealed class ApiService(
 
     public Task<GlobalConfigModel> GetGlobalConfigAsync() => globalConfigApi.GetAsync();
     public Task SaveGlobalConfigAsync(GlobalConfigModel config) => globalConfigApi.SaveAsync(config);
+
+    public Task<List<AccessTicketDto>> GetTicketsAsync() => ticketsApi.GetAllAsync();
+    public Task<AccessTicketCreatedDto> CreateTicketAsync(CreateAccessTicketRequest req) => ticketsApi.CreateAsync(req);
+    public Task DeleteTicketAsync(Guid id) => ticketsApi.DeleteAsync(id);
 }

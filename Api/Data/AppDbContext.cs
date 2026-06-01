@@ -10,6 +10,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<DataSource> DataSources => Set<DataSource>();
     public DbSet<EncryptedFile> EncryptedFiles => Set<EncryptedFile>();
     public DbSet<GlobalConfig> GlobalConfigs => Set<GlobalConfig>();
+    public DbSet<AccessTicket> AccessTickets => Set<AccessTicket>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

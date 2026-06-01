@@ -1,7 +1,6 @@
 using Api.Data;
 using Api.Data.Entities;
 using FubarDev.FtpServer.AccountManagement;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Shared.Models;
 using System.Security.Claims;
@@ -28,20 +27,19 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
                 new ClaimsPrincipal(anonIdentity));
         }
 
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
-        var user = await userManager.FindByEmailAsync(username);
-        if (user is null || !user.IsActive)
-            return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
+        var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var ticket = await db2.AccessTickets
+            .FirstOrDefaultAsync(t => t.Username == username
+                && t.Password == password
+                && t.ExpiresAt > DateTimeOffset.UtcNow);
 
-        var valid = await userManager.CheckPasswordAsync(user, password);
-        if (!valid)
+        if (ticket is null)
             return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
 
         var claims = new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.Email!),
-            new Claim(ClaimTypes.Email, user.Email!)
+            new Claim(ClaimTypes.NameIdentifier, ticket.UserId.ToString()),
+            new Claim(ClaimTypes.Name, ticket.Username),
         };
         var identity = new ClaimsIdentity(claims, "ftp");
         return new MemberValidationResult(MemberValidationStatus.AuthenticatedUser,

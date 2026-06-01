@@ -131,6 +131,8 @@ builder.Services.AddSingleton<IFrontendDataSource, FtpFrontendDataSource>();
 builder.Services.AddSingleton<Api.Sftp.EncryptedSftpServer>();
 builder.Services.AddSingleton<IFrontendDataSource, SftpFrontendDataSource>();
 
+builder.Services.AddHostedService<Api.Services.TicketCleanupService>();
+
 builder.Services.AddFtpServer(opt => { });
 builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
 {

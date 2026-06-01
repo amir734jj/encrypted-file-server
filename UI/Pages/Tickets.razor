@@ -1,0 +1,188 @@
+@page "/tickets"
+@inject ApiService Api
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IHxMessengerService Messenger
+@inject IHxMessageBoxService MessageBox
+
+@if (!Auth.IsAuthenticated)
+{
+    Nav.NavigateTo("/login");
+    return;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3><i class="bi bi-ticket-perforated me-2"></i>Access Tickets</h3>
+    <HxButton Color="ThemeColor.Primary" OnClick="ShowCreateModal">
+        <i class="bi bi-plus-lg me-1"></i> New Ticket
+    </HxButton>
+</div>
+
+<p class="text-muted mb-3">
+    Access tickets provide temporary credentials for FTP, SFTP, and HTTP file browsing.
+    Each ticket has a random username and password that expires at the time you choose.
+</p>
+
+@if (_tickets is null)
+{
+    <div class="d-flex align-items-center">
+        <div class="spinner-border spinner-border-sm me-2"></div>
+        Loading...
+    </div>
+}
+else if (_tickets.Count == 0)
+{
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle me-2"></i>No active tickets. Create one to access your files via FTP, SFTP, or HTTP.
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Created</th>
+                    <th>Expires</th>
+                    <th>Time Left</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var ticket in _tickets)
+                {
+                    var remaining = ticket.ExpiresAt - DateTimeOffset.UtcNow;
+                    <tr>
+                        <td><code>@ticket.Username</code></td>
+                        <td>@ticket.CreatedAt.LocalDateTime.ToString("g")</td>
+                        <td>@ticket.ExpiresAt.LocalDateTime.ToString("g")</td>
+                        <td>
+                            @if (remaining.TotalMinutes < 60)
+                            {
+                                <span class="text-danger">@((int)remaining.TotalMinutes)m</span>
+                            }
+                            else if (remaining.TotalHours < 24)
+                            {
+                                <span class="text-warning">@((int)remaining.TotalHours)h @(remaining.Minutes)m</span>
+                            }
+                            else
+                            {
+                                <span>@((int)remaining.TotalDays)d @(remaining.Hours)h</span>
+                            }
+                        </td>
+                        <td>
+                            <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" OnClick="() => DeleteTicket(ticket)">
+                                <i class="bi bi-trash"></i>
+                            </HxButton>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_createdTicket is not null)
+{
+    <div class="alert alert-success mt-3">
+        <h5><i class="bi bi-check-circle me-2"></i>Ticket Created</h5>
+        <p class="mb-1"><strong>Username:</strong> <code>@_createdTicket.Username</code></p>
+        <p class="mb-1"><strong>Password:</strong> <code>@_createdTicket.Password</code></p>
+        <p class="mb-0 text-muted small">
+            <i class="bi bi-exclamation-triangle me-1"></i>Copy the password now — it will not be shown again.
+        </p>
+    </div>
+}
+
+<HxModal @ref="_createModal" Title="Create Access Ticket" Size="ModalSize.Regular">
+    <BodyTemplate>
+        <div class="mb-3">
+            <label class="form-label">Expiration</label>
+            <HxSelect TItem="ExpirationOption" TValue="ExpirationOption"
+                      Data="_expirationOptions"
+                      @bind-Value="_selectedExpiration"
+                      TextSelector="@(o => o.Label)"
+                      ValueSelector="@(o => o)"
+                      Nullable="false" />
+        </div>
+    </BodyTemplate>
+    <FooterTemplate>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _createModal!.HideAsync()">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Primary" OnClick="CreateTicket">Create</HxButton>
+    </FooterTemplate>
+</HxModal>
+
+@code {
+    private List<AccessTicketDto>? _tickets;
+    private AccessTicketCreatedDto? _createdTicket;
+    private HxModal? _createModal;
+    private ExpirationOption _selectedExpiration = ExpirationOptions[1]; // 1 day default
+
+    private static readonly ExpirationOption[] ExpirationOptions =
+    [
+        new("1 Hour", TimeSpan.FromHours(1)),
+        new("1 Day", TimeSpan.FromDays(1)),
+        new("7 Days", TimeSpan.FromDays(7)),
+        new("30 Days", TimeSpan.FromDays(30)),
+        new("90 Days", TimeSpan.FromDays(90)),
+    ];
+
+    private readonly List<ExpirationOption> _expirationOptions = [.. ExpirationOptions];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _tickets = await Api.GetTicketsAsync();
+        }
+        catch
+        {
+            _tickets = [];
+        }
+    }
+
+    private async Task ShowCreateModal()
+    {
+        _createdTicket = null;
+        await _createModal!.ShowAsync();
+    }
+
+    private async Task CreateTicket()
+    {
+        try
+        {
+            var req = new CreateAccessTicketRequest(DateTimeOffset.UtcNow + _selectedExpiration.Duration);
+            _createdTicket = await Api.CreateTicketAsync(req);
+            await _createModal!.HideAsync();
+            await LoadAsync();
+            Messenger.AddInformation("Access ticket created.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to create ticket: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteTicket(AccessTicketDto ticket)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Revoke ticket '{ticket.Username}'?");
+        if (!confirmed) return;
+
+        try
+        {
+            await Api.DeleteTicketAsync(ticket.Id);
+            _createdTicket = null;
+            await LoadAsync();
+            Messenger.AddInformation("Ticket revoked.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to revoke ticket: {ex.Message}");
+        }
+    }
+
+    private record ExpirationOption(string Label, TimeSpan Duration);
+}

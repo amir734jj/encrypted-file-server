@@ -41,7 +41,8 @@ foreach (var apiType in new[]
     typeof(IProfileApi),
     typeof(IDataSourcesApi),
     typeof(IFilesApi),
-    typeof(IGlobalConfigApi)
+    typeof(IGlobalConfigApi),
+    typeof(ITicketsApi)
 })
 {
     builder.Services
