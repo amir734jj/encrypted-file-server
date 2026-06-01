@@ -129,9 +129,13 @@ else
                 <div class="text-warning small mt-1"><i class="bi bi-exclamation-triangle me-1"></i>Leading slash will be removed. Use a relative path.</div>
             }
         </div>
-        <div class="mb-3">
-            <HxSwitch @bind-Value="_backendSsl" Text="Use SSL/TLS" />
-        </div>
+        @if (_backendProtocol == BackendStorageType.FtpClient)
+        {
+            <div class="mb-3">
+                <HxSwitch @bind-Value="_backendSsl" Text="Use SSL/TLS (FTPS)" />
+                <small class="text-muted">Upgrades the FTP connection to use TLS encryption.</small>
+            </div>
+        }
         <div class="mb-3">
             <HxInputText Label="Master Password" @bind-Value="_masterPassword" Type="InputType.Password"
                          Hint="Encryption key for files. Use the same password to re-attach to existing backends." />
@@ -276,6 +280,9 @@ else
         else if (_backendProtocol == BackendStorageType.SftpClient && _backendPort == 22)
             _backendPort = 21;
         _backendProtocol = protocol;
+        // SSL/TLS only applies to FTP (FTPS); SFTP is always encrypted via SSH
+        if (protocol == BackendStorageType.SftpClient)
+            _backendSsl = false;
     }
 
     private async Task SaveDataSource()
