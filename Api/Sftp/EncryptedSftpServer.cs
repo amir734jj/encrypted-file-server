@@ -51,7 +51,7 @@ public sealed class EncryptedSftpServer : IDisposable
 
     private void OnConnectionAccepted(object? sender, Session session)
     {
-        _logger.LogDebug("SSH connection accepted: {SessionId}", BitConverter.ToString(session.SessionId));
+        _logger.LogDebug("SSH connection accepted");
 
         Guid? authenticatedUserId = null;
         bool isAnonymous = false;
