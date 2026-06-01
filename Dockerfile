@@ -19,6 +19,5 @@ RUN mkdir -p /app/storage
 EXPOSE 5000 2121 2222 50000-50100
 
 ENV ASPNETCORE_ENVIRONMENT=Production
-ENV Storage__BasePath=/app/storage
 
 ENTRYPOINT ["dotnet", "Api.dll"]
