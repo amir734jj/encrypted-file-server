@@ -1,7 +1,9 @@
+using Api.Data;
 using Api.Data.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Shared;
 using Shared.Contracts;
 
@@ -10,7 +12,7 @@ namespace Api.Controllers;
 [ApiController]
 [Route("api/users")]
 [Authorize(Roles = Roles.Admin)]
-public sealed class UsersController(UserManager<User> users) : ControllerBase
+public sealed class UsersController(UserManager<User> users, AppDbContext db) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll()
@@ -46,6 +48,10 @@ public sealed class UsersController(UserManager<User> users) : ControllerBase
 
         user.IsActive = false;
         await users.UpdateAsync(user);
+
+        // Revoke all access tickets for this user
+        await db.AccessTickets.Where(t => t.UserId == id).ExecuteDeleteAsync();
+
         return NoContent();
     }
 
@@ -54,6 +60,9 @@ public sealed class UsersController(UserManager<User> users) : ControllerBase
     {
         var user = await users.FindByIdAsync(id.ToString());
         if (user is null) return NotFound();
+
+        // Revoke all access tickets before deleting
+        await db.AccessTickets.Where(t => t.UserId == id).ExecuteDeleteAsync();
 
         await users.DeleteAsync(user);
         return NoContent();

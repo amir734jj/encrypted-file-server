@@ -4,6 +4,7 @@ using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Interfaces;
 using Shared.Models;
@@ -15,7 +16,8 @@ namespace Api.Controllers;
 public sealed class BrowseController(
     IEfRepository repository,
     IFileStorageService fileStorage,
-    IEncryptionProviderFactory encryptionFactory) : ControllerBase
+    IEncryptionProviderFactory encryptionFactory,
+    UserManager<User> userManager) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
@@ -167,7 +169,12 @@ public sealed class BrowseController(
                 maxResults: 1)).ToList();
 
             if (tickets.Count > 0)
-                return (ds, masterKey, null);
+            {
+                // Reject if the ticket owner's account is disabled
+                var ticketOwner = await userManager.FindByIdAsync(tickets.First().UserId.ToString());
+                if (ticketOwner is not null && ticketOwner.IsActive)
+                    return (ds, masterKey, null);
+            }
         }
 
         Response.Headers["WWW-Authenticate"] = $"Basic realm=\"{ds.Name}\"";

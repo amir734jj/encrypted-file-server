@@ -82,12 +82,15 @@ else
         </div>
         <div class="mb-3">
             <label class="form-label">Encryption Method</label>
-            <select class="form-select" @bind="_encryptionMethod">
-                @foreach (var method in Enum.GetValues<EncryptionMethod>())
-                {
-                    <option value="@method">@method</option>
-                }
-            </select>
+            @foreach (var method in Enum.GetValues<EncryptionMethod>())
+            {
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="encryptionMethod"
+                           id="enc-@method" value="@method" checked="@(_encryptionMethod == method)"
+                           @onchange="() => _encryptionMethod = method" />
+                    <label class="form-check-label" for="enc-@method">@method</label>
+                </div>
+            }
         </div>
 
         <h6 class="text-muted mb-2 mt-4">Backend FTP Server</h6>

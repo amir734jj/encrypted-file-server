@@ -1,6 +1,7 @@
 using Api.Data.Entities;
 using EfCoreRepository.Interfaces;
 using FubarDev.FtpServer.AccountManagement;
+using Microsoft.AspNetCore.Identity;
 using Shared.Models;
 using System.Security.Claims;
 
@@ -12,6 +13,7 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
     {
         using var scope = scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IEfRepository>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
 
         if (string.Equals(username, "anonymous", StringComparison.OrdinalIgnoreCase))
         {
@@ -36,6 +38,12 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
             return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
 
         var ticket = tickets.First();
+
+        // Reject if the ticket owner's account is disabled
+        var ticketOwner = await userManager.FindByIdAsync(ticket.UserId.ToString());
+        if (ticketOwner is null || !ticketOwner.IsActive)
+            return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
+
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, ticket.UserId.ToString()),

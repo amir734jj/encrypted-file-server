@@ -2,6 +2,7 @@ using Api.Data.Entities;
 using EfCoreRepository.Interfaces;
 using FxSsh;
 using FxSsh.Services;
+using Microsoft.AspNetCore.Identity;
 using Shared.Models;
 
 namespace Api.Sftp;
@@ -111,7 +112,15 @@ public sealed class EncryptedSftpServer : IDisposable
         if (tickets.Count == 0)
             return (false, null);
 
-        return (true, tickets.First().UserId);
+        var ticket = tickets.First();
+
+        // Reject if the ticket owner's account is disabled
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+        var ticketOwner = userManager.FindByIdAsync(ticket.UserId.ToString()).GetAwaiter().GetResult();
+        if (ticketOwner is null || !ticketOwner.IsActive)
+            return (false, null);
+
+        return (true, ticket.UserId);
     }
 
     private static string LoadOrGenerateHostKey()
