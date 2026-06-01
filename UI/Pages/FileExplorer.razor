@@ -116,6 +116,11 @@ else
                         <td><span class="badge bg-secondary">folder</span></td>
                         <td></td>
                         <td class="text-end">
+                            <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" Outline="true"
+                                      OnClick="() => ShowMoveFolder(folder)" OnClickStopPropagation="true"
+                                      title="Move">
+                                <i class="bi bi-arrows-move"></i>
+                            </HxButton>
                             <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true"
                                       OnClick="() => DeleteFolder(folder)" OnClickStopPropagation="true">
                                 <i class="bi bi-trash"></i>
@@ -151,6 +156,48 @@ else
     </small>
 }
 
+@if (_movingFolder is not null)
+{
+    <div class="modal show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Move "@_movingFolder.Name"</h5>
+                    <button type="button" class="btn-close" @onclick="CancelMove"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Select destination folder:</p>
+                    <div class="list-group">
+                        @if (GetPathSegments().Count > 0)
+                        {
+                            <button class="list-group-item list-group-item-action @(_moveDestination == ".." ? "active" : "")"
+                                    @onclick='() => _moveDestination = ".."'>                                <i class="bi bi-arrow-up me-1"></i> .. (parent)
+                            </button>
+                        }
+                        @if (_listing is not null)
+                        {
+                            @foreach (var folder in _listing.Folders.Where(f => f.Name != _movingFolder!.Name))
+                            {
+                                var name = folder.Name;
+                                <button class="list-group-item list-group-item-action @(_moveDestination == name ? "active" : "")"
+                                        @onclick="() => _moveDestination = name">
+                                    <i class="bi bi-folder-fill text-warning me-1"></i> @name
+                                </button>
+                            }
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <HxButton Color="ThemeColor.Secondary" OnClick="CancelMove">Cancel</HxButton>
+                    <HxButton Color="ThemeColor.Primary" OnClick="ExecuteMove" Enabled="@(!string.IsNullOrEmpty(_moveDestination))">
+                        <i class="bi bi-arrows-move me-1"></i> Move
+                    </HxButton>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter] public Guid DataSourceId { get; set; }
     [Parameter] public string? Path { get; set; }
@@ -161,6 +208,8 @@ else
     private int _uploadTotal;
     private string _uploadFileName = string.Empty;
     private int _uploadInputKey;
+    private FolderEntryDto? _movingFolder;
+    private string? _moveDestination;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -287,6 +336,63 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to delete folder: {ex.Message}");
+        }
+    }
+
+    private void ShowMoveFolder(FolderEntryDto folder)
+    {
+        _movingFolder = folder;
+        _moveDestination = null;
+    }
+
+    private void CancelMove()
+    {
+        _movingFolder = null;
+        _moveDestination = null;
+    }
+
+    private async Task ExecuteMove()
+    {
+        if (_movingFolder is null || string.IsNullOrEmpty(_moveDestination))
+        {
+            return;
+        }
+
+        try
+        {
+            var sourcePath = string.IsNullOrEmpty(Path)
+                ? _movingFolder.Name + "/"
+                : $"{Path}/{_movingFolder.Name}/";
+
+            string destPath;
+            if (_moveDestination == "..")
+            {
+                // Move to parent: strip one segment from Path
+                var segments = GetPathSegments();
+                var parentPath = segments.Count > 1
+                    ? string.Join("/", segments.Take(segments.Count - 1))
+                    : "";
+                destPath = string.IsNullOrEmpty(parentPath)
+                    ? _movingFolder.Name + "/"
+                    : $"{parentPath}/{_movingFolder.Name}/";
+            }
+            else
+            {
+                // Move into sibling folder
+                destPath = string.IsNullOrEmpty(Path)
+                    ? $"{_moveDestination}/{_movingFolder.Name}/"
+                    : $"{Path}/{_moveDestination}/{_movingFolder.Name}/";
+            }
+
+            await Api.MoveFolderAsync(DataSourceId, sourcePath, destPath);
+            _movingFolder = null;
+            _moveDestination = null;
+            await LoadAsync();
+            Messenger.AddInformation("Folder moved.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to move folder: {ex.Message}");
         }
     }
 

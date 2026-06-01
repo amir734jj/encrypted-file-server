@@ -1,6 +1,7 @@
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using Api.Services.Backend;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +18,8 @@ namespace Api.Controllers;
 public sealed class FilesController(
     IEfRepository repository,
     IFileStorageService fileStorage,
-    IEncryptionProviderFactory encryptionFactory) : ControllerBase
+    IEncryptionProviderFactory encryptionFactory,
+    IBackendStorageProviderFactory backendStorageFactory) : ControllerBase
 {
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
@@ -228,6 +230,85 @@ public sealed class FilesController(
             await fileStorage.DeleteFileAsync(file);
 
         return Ok(new { Deleted = toDelete.Count });
+    }
+
+    [HttpPost("move-folder")]
+    public async Task<IActionResult> MoveFolder([FromQuery] Guid dataSourceId, [FromQuery] string sourcePath, [FromQuery] string destinationPath)
+    {
+        sourcePath = NormalizePath(sourcePath);
+        destinationPath = NormalizePath(destinationPath);
+
+        if (string.IsNullOrEmpty(sourcePath))
+        {
+            return BadRequest("Cannot move root folder.");
+        }
+
+        if (destinationPath.StartsWith(sourcePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Cannot move a folder into itself.");
+        }
+
+        var ds = await GetDataSource(dataSourceId);
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+        var defaultMethod = ds.Backend.EncryptionMethod;
+
+        var allFiles = (await FileDal.GetAll(
+            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
+            project: f => f)).ToList();
+
+        var moved = 0;
+        foreach (var f in allFiles)
+        {
+            string fullPath;
+            try
+            {
+                var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!fullPath.StartsWith(sourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var encryption2 = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+            var iv2 = Convert.FromBase64String(f.IvBase64);
+            var newFullPath = destinationPath + fullPath[sourcePath.Length..];
+            var encryptedName = encryption2.EncryptString(newFullPath, masterKey, iv2);
+
+            string? newStoragePath = null;
+            if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
+            {
+                var connection = ds.ToBackendConnectionInfo();
+                newStoragePath = await backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, f.StoragePath, newFullPath);
+            }
+
+            var capturedEncryptedName = encryptedName;
+            var capturedStoragePath = newStoragePath;
+            await FileDal.Update(f.Id, (Action<EncryptedFile>)(existing =>
+            {
+                existing.OriginalFileName = capturedEncryptedName;
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                if (capturedStoragePath is not null)
+                {
+                    existing.StoragePath = capturedStoragePath;
+                }
+            }));
+
+            moved++;
+        }
+
+        return Ok(new { Moved = moved });
     }
 
     private async Task<DataSource?> GetDataSource(Guid id)

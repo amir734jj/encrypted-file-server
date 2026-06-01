@@ -100,6 +100,7 @@ public sealed class ApiService(
 
     public Task DeleteFileAsync(Guid id) => filesApi.DeleteAsync(id);
     public Task DeleteFolderAsync(Guid dataSourceId, string path) => filesApi.DeleteFolderAsync(dataSourceId, path);
+    public Task MoveFolderAsync(Guid dataSourceId, string sourcePath, string destinationPath) => filesApi.MoveFolderAsync(dataSourceId, sourcePath, destinationPath);
 
     public Task<GlobalConfigModel> GetGlobalConfigAsync() => globalConfigApi.GetAsync();
     public Task SaveGlobalConfigAsync(GlobalConfigModel config) => globalConfigApi.SaveAsync(config);
