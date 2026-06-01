@@ -46,9 +46,6 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : "Files")</h3>
     <div class="d-flex gap-2">
-        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="ShowNewFolderPrompt">
-            <i class="bi bi-folder-plus me-1"></i> New Folder
-        </HxButton>
         <InputFile @key="_uploadInputKey" OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
         <label for="fileUpload" class="btn btn-primary btn-sm">
             <i class="bi bi-upload me-1"></i> Upload Files
@@ -154,17 +151,6 @@ else
     </small>
 }
 
-<HxModal @ref="_newFolderModal" Title="New Folder">
-    <BodyTemplate>
-        <HxInputText Label="Folder Name" @bind-Value="_newFolderName" Placeholder="documents" />
-    </BodyTemplate>
-    <FooterTemplate>
-        <HxButton Color="ThemeColor.Secondary" OnClick="() => _newFolderModal.HideAsync()">Cancel</HxButton>
-        <HxButton Color="ThemeColor.Primary" OnClick="CreateFolder"
-                  Enabled="@(!string.IsNullOrWhiteSpace(_newFolderName))">Create</HxButton>
-    </FooterTemplate>
-</HxModal>
-
 @code {
     [Parameter] public Guid DataSourceId { get; set; }
     [Parameter] public string? Path { get; set; }
@@ -175,8 +161,7 @@ else
     private int _uploadTotal;
     private string _uploadFileName = string.Empty;
     private int _uploadInputKey;
-    private HxModal _newFolderModal = null!;
-    private string _newFolderName = string.Empty;
+
     protected override async Task OnParametersSetAsync()
     {
         if (!Auth.IsAuthenticated)
@@ -213,21 +198,6 @@ else
             ? $"/files/{DataSourceId}"
             : $"/files/{DataSourceId}/{folderPath}";
         Nav.NavigateTo(url);
-    }
-
-    private async Task ShowNewFolderPrompt()
-    {
-        _newFolderName = string.Empty;
-        await _newFolderModal.ShowAsync();
-    }
-
-    private async Task CreateFolder()
-    {
-        await _newFolderModal.HideAsync();
-        var folderPath = string.IsNullOrEmpty(Path)
-            ? _newFolderName.Trim()
-            : $"{Path}/{_newFolderName.Trim()}";
-        NavigateTo(folderPath);
     }
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
