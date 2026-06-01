@@ -194,7 +194,7 @@ foreach (var frontend in frontends)
 }
 
 app.UseBlazorFrameworkFiles();
-app.MapStaticAssets();
+app.UseStaticFiles();
 
 if (app.Environment.IsDevelopment())
 {

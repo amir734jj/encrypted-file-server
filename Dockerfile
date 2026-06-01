@@ -5,7 +5,6 @@ COPY . .
 RUN dotnet restore
 
 RUN dotnet publish Api/Api.csproj -c Release -o /app/publish
-RUN dotnet publish UI/UI.csproj -c Release -o /app/ui-publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
 WORKDIR /app
@@ -13,8 +12,6 @@ WORKDIR /app
 RUN apk add --no-cache krb5-libs
 
 COPY --from=build /app/publish .
-COPY --from=build /app/ui-publish/wwwroot ./wwwroot
-COPY --from=build /app/ui-publish/UI.staticwebassets.endpoints.json .
 
 EXPOSE 5000 2121 2222 50000-50100
 
