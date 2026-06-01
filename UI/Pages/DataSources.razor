@@ -302,6 +302,7 @@ else
 
             await _modal.HideAsync();
             await LoadAsync();
+            StateHasChanged();
         }
         catch (Exception ex)
         {
