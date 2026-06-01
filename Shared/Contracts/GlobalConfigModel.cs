@@ -19,10 +19,4 @@ public class GlobalConfigModel
 
     [GlobalConfigCol(Name = "ENCRYPTION_ALGORITHM")]
     public string EncryptionAlgorithm { get; set; } = "aes-cbc-256";
-
-    [GlobalConfigCol(Name = "AUTO_ACTIVATE_USERS")]
-    public bool AutoActivateUsers { get; set; }
-
-    [GlobalConfigCol(Name = "ALLOW_REGISTRATION")]
-    public bool AllowRegistration { get; set; } = true;
 }
