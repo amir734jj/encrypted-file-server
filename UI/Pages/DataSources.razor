@@ -145,11 +145,14 @@ else
                 <small class="text-muted">Upgrades the FTP connection to use TLS encryption.</small>
             </div>
         }
-        <div class="mb-3">
-            <HxInputText Label="Master Password" @bind-Value="_masterPassword" Type="InputType.Password"
-                         Placeholder="@(_editId.HasValue ? "(unchanged)" : "")"
-                         Hint="@(_editId.HasValue ? "Leave blank to keep current password." : "Encryption key for files. Use the same password to re-attach to existing backends.")" />
-        </div>
+        @if (_encryptionMethod != EncryptionMethod.None)
+        {
+            <div class="mb-3">
+                <HxInputText Label="Master Password" @bind-Value="_masterPassword" Type="InputType.Password"
+                             Placeholder="@(_editId.HasValue ? "(unchanged)" : "")"
+                             Hint="@(_editId.HasValue ? "Leave blank to keep current password." : "Encryption key for files. Use the same password to re-attach to existing backends.")" />
+            </div>
+        }
 
         <h6 class="text-muted mb-2 mt-4">Frontend Access</h6>
         <div class="mb-2">
@@ -280,7 +283,7 @@ else
 
     private bool IsFormValid() =>
         !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_backendHost)
-        && (_editId.HasValue || !string.IsNullOrWhiteSpace(_masterPassword));
+        && (_encryptionMethod == EncryptionMethod.None || _editId.HasValue || !string.IsNullOrWhiteSpace(_masterPassword));
 
     private void SetProtocol(BackendStorageType protocol)
     {
