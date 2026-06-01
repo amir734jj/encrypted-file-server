@@ -74,7 +74,7 @@ else
 }
 
 @* Create / Edit Modal *@
-<HxModal @bind-IsOpen="_showModal" Title="@(_editId.HasValue ? "Edit Data Source" : "New Data Source")">
+<HxModal @bind-Open="_showModal" Title="@(_editId.HasValue ? "Edit Data Source" : "New Data Source")">
     <BodyTemplate>
         <h6 class="text-muted mb-2">General</h6>
         <div class="mb-3">
