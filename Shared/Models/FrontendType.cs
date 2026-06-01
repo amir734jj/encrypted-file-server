@@ -4,5 +4,5 @@ public enum FrontendType
 {
     Ftp,
     Http,
-    WebDav
+    Sftp
 }

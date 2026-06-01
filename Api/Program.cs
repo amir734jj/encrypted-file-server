@@ -128,7 +128,8 @@ builder.Services.AddSingleton<Api.Interfaces.IEncryptionProviderFactory, Encrypt
 builder.Services.AddSingleton<IBackendStorageProvider, FtpBackendStorageProvider>();
 builder.Services.AddSingleton<IFrontendDataSource, HttpFrontendDataSource>();
 builder.Services.AddSingleton<IFrontendDataSource, FtpFrontendDataSource>();
-builder.Services.AddSingleton<IFrontendDataSource, WebDavFrontendDataSource>();
+builder.Services.AddSingleton<Api.Sftp.EncryptedSftpServer>();
+builder.Services.AddSingleton<IFrontendDataSource, SftpFrontendDataSource>();
 
 builder.Services.AddFtpServer(opt => { });
 builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
@@ -204,7 +205,6 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<ActiveUserMiddleware>();
 app.UseAuthorization();
-app.UseMiddleware<Api.WebDav.WebDavMiddleware>();
 app.UseSerilogRequestLogging(opts =>
 {
     opts.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>

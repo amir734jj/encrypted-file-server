@@ -1,0 +1,850 @@
+using System.Buffers.Binary;
+using System.Text;
+using Api.Data;
+using Api.Data.Entities;
+using Api.Interfaces;
+using FxSsh;
+using FxSsh.Services;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Shared.Interfaces;
+using Shared.Models;
+using Channel = System.Threading.Channels.Channel;
+
+namespace Api.Sftp;
+
+/// <summary>
+/// Implements the SFTP binary protocol (v3) over an SSH channel.
+/// Virtual filesystem: / → DataSource dirs → encrypted files (served decrypted).
+/// </summary>
+public sealed class SftpSubsystem : IDisposable
+{
+    // SFTP packet types
+    private const byte SSH_FXP_INIT = 1, SSH_FXP_VERSION = 2;
+    private const byte SSH_FXP_OPEN = 3, SSH_FXP_CLOSE = 4, SSH_FXP_READ = 5, SSH_FXP_WRITE = 6;
+    private const byte SSH_FXP_LSTAT = 7, SSH_FXP_FSTAT = 8, SSH_FXP_SETSTAT = 9, SSH_FXP_FSETSTAT = 10;
+    private const byte SSH_FXP_OPENDIR = 11, SSH_FXP_READDIR = 12;
+    private const byte SSH_FXP_REMOVE = 13, SSH_FXP_MKDIR = 14, SSH_FXP_RMDIR = 15;
+    private const byte SSH_FXP_REALPATH = 16, SSH_FXP_STAT = 17;
+
+    private const byte SSH_FXP_STATUS = 101, SSH_FXP_HANDLE = 102;
+    private const byte SSH_FXP_DATA = 103, SSH_FXP_NAME = 104, SSH_FXP_ATTRS = 105;
+
+    // Status codes
+    private const uint SSH_FX_OK = 0, SSH_FX_EOF = 1, SSH_FX_NO_SUCH_FILE = 2;
+    private const uint SSH_FX_PERMISSION_DENIED = 3, SSH_FX_FAILURE = 4, SSH_FX_OP_UNSUPPORTED = 8;
+
+    // Open flags
+    private const uint SSH_FXF_READ = 0x01, SSH_FXF_WRITE = 0x02, SSH_FXF_CREAT = 0x08, SSH_FXF_TRUNC = 0x10;
+
+    // Attr flags
+    private const uint ATTR_SIZE = 0x01, ATTR_UIDGID = 0x02, ATTR_PERMS = 0x04, ATTR_ACMODTIME = 0x08;
+
+    // POSIX mode bits
+    private const uint S_IFDIR = 0x4000, S_IFREG = 0x8000;
+    private const uint DIR_MODE = S_IFDIR | 0x1ED;   // drwxr-xr-x
+    private const uint FILE_MODE = S_IFREG | 0x1A4;  // -rw-r--r--
+
+    // Handle types
+    private sealed record DirHandle(List<VfsEntry> Entries, bool Sent);
+    private sealed record ReadHandle(EncryptedFile File, Stream Stream, long Position);
+    private sealed record WriteHandle(Guid DataSourceId, string Path, string? ContentType, MemoryStream Buffer);
+    private sealed record VfsEntry(string Name, bool IsDir, long Size, DateTimeOffset Modified);
+
+    // State
+    private readonly SessionChannel _channel;
+    private readonly IServiceScope _scope;
+    private readonly Guid? _userId;
+    private readonly ILogger _logger;
+    private readonly AppDbContext _db;
+    private readonly IFileStorageService _fileStorage;
+    private readonly IEncryptionProviderFactory _encryptionFactory;
+    private readonly UserManager<User> _userManager;
+    private readonly Dictionary<string, object> _handles = new();
+    private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
+    private readonly CancellationTokenSource _cts = new();
+    private int _handleCounter;
+    private byte[] _buffer = [];
+    private Task? _processTask;
+    private bool _disposed;
+
+    public SftpSubsystem(SessionChannel channel, IServiceScope scope, Guid? userId, ILogger logger)
+    {
+        _channel = channel;
+        _scope = scope;
+        _userId = userId;
+        _logger = logger;
+        _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
+        _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
+        _userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+    }
+
+    public void Start()
+    {
+        _channel.DataReceived += OnData;
+        _channel.CloseReceived += OnClose;
+        _processTask = Task.Run(() => ProcessLoopAsync(_cts.Token));
+    }
+
+    private void OnData(object? sender, byte[] data) => _inbound.Writer.TryWrite(data);
+
+    private void OnClose(object? sender, EventArgs e)
+    {
+        _cts.Cancel();
+        _inbound.Writer.TryComplete();
+    }
+
+    private async Task ProcessLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var chunk in _inbound.Reader.ReadAllAsync(ct))
+            {
+                AppendBuffer(chunk);
+                while (TryReadPacket(out var type, out var payload))
+                {
+                    try
+                    {
+                        await HandlePacketAsync(type, payload);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error processing SFTP packet type {Type}", type);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SFTP process loop error");
+        }
+        finally
+        {
+            Dispose();
+        }
+    }
+
+    #region Packet framing
+
+    private void AppendBuffer(byte[] data)
+    {
+        var newBuf = new byte[_buffer.Length + data.Length];
+        Buffer.BlockCopy(_buffer, 0, newBuf, 0, _buffer.Length);
+        Buffer.BlockCopy(data, 0, newBuf, _buffer.Length, data.Length);
+        _buffer = newBuf;
+    }
+
+    private bool TryReadPacket(out byte type, out byte[] payload)
+    {
+        type = 0;
+        payload = [];
+        if (_buffer.Length < 5) return false;
+        var length = (int)BinaryPrimitives.ReadUInt32BigEndian(_buffer);
+        if (_buffer.Length < 4 + length) return false;
+        type = _buffer[4];
+        payload = _buffer[5..(4 + length)];
+        _buffer = _buffer[(4 + length)..];
+        return true;
+    }
+
+    private void Send(byte[] packet) => _channel.SendData(packet);
+
+    #endregion
+
+    #region Packet dispatch
+
+    private async Task HandlePacketAsync(byte type, byte[] payload)
+    {
+        if (type == SSH_FXP_INIT)
+        {
+            HandleInit(payload);
+            return;
+        }
+
+        var r = new SftpReader(payload);
+        var requestId = r.ReadUInt32();
+
+        switch (type)
+        {
+            case SSH_FXP_REALPATH: await HandleRealpath(requestId, r); break;
+            case SSH_FXP_STAT:
+            case SSH_FXP_LSTAT: await HandleStat(requestId, r); break;
+            case SSH_FXP_FSTAT: HandleFstat(requestId, r); break;
+            case SSH_FXP_OPENDIR: await HandleOpendir(requestId, r); break;
+            case SSH_FXP_READDIR: HandleReaddir(requestId, r); break;
+            case SSH_FXP_CLOSE: HandleClose(requestId, r); break;
+            case SSH_FXP_OPEN: await HandleOpen(requestId, r); break;
+            case SSH_FXP_READ: await HandleRead(requestId, r); break;
+            case SSH_FXP_WRITE: HandleWrite(requestId, r); break;
+            case SSH_FXP_REMOVE: await HandleRemove(requestId, r); break;
+            case SSH_FXP_MKDIR: SendStatus(requestId, SSH_FX_OK); break;
+            case SSH_FXP_RMDIR: SendStatus(requestId, SSH_FX_OK); break;
+            case SSH_FXP_SETSTAT:
+            case SSH_FXP_FSETSTAT: SendStatus(requestId, SSH_FX_OK); break;
+            default:
+                _logger.LogDebug("Unsupported SFTP packet type {Type}", type);
+                SendStatus(requestId, SSH_FX_OP_UNSUPPORTED);
+                break;
+        }
+    }
+
+    private void HandleInit(byte[] payload)
+    {
+        // Client sends version (uint32). We respond with version 3.
+        Send(BuildPacket(SSH_FXP_VERSION, w => w.WriteUInt32(3)));
+    }
+
+    #endregion
+
+    #region Path operations
+
+    private async Task HandleRealpath(uint id, SftpReader r)
+    {
+        var path = NormalizePath(r.ReadString());
+        Send(BuildNamePacket(id, path, DirAttrs(DateTimeOffset.UtcNow)));
+    }
+
+    private async Task HandleStat(uint id, SftpReader r)
+    {
+        var path = NormalizePath(r.ReadString());
+
+        if (path == "/")
+        {
+            Send(BuildAttrsPacket(id, DirAttrs(DateTimeOffset.UtcNow)));
+            return;
+        }
+
+        var parts = path.TrimStart('/').Split('/', 2);
+        var dsName = parts[0];
+        var ds = await FindDataSourceByNameAsync(dsName);
+
+        if (ds is null)
+        {
+            SendStatus(id, SSH_FX_NO_SUCH_FILE);
+            return;
+        }
+
+        if (parts.Length == 1)
+        {
+            Send(BuildAttrsPacket(id, DirAttrs(ds.CreatedAt)));
+            return;
+        }
+
+        var subPath = parts[1];
+        var (entry, _) = await FindEntryAsync(ds, subPath);
+        if (entry is null)
+        {
+            SendStatus(id, SSH_FX_NO_SUCH_FILE);
+            return;
+        }
+
+        Send(BuildAttrsPacket(id, entry.IsDir
+            ? DirAttrs(entry.Modified)
+            : FileAttrs(entry.Size, entry.Modified)));
+    }
+
+    private void HandleFstat(uint id, SftpReader r)
+    {
+        var handle = r.ReadString();
+        if (_handles.TryGetValue(handle, out var h))
+        {
+            switch (h)
+            {
+                case DirHandle:
+                    Send(BuildAttrsPacket(id, DirAttrs(DateTimeOffset.UtcNow)));
+                    return;
+                case ReadHandle rh:
+                    Send(BuildAttrsPacket(id, FileAttrs(rh.File.OriginalFileSize, rh.File.CreatedAt)));
+                    return;
+                case WriteHandle:
+                    Send(BuildAttrsPacket(id, FileAttrs(0, DateTimeOffset.UtcNow)));
+                    return;
+            }
+        }
+        SendStatus(id, SSH_FX_FAILURE);
+    }
+
+    #endregion
+
+    #region Directory operations
+
+    private async Task HandleOpendir(uint id, SftpReader r)
+    {
+        var path = NormalizePath(r.ReadString());
+        List<VfsEntry> entries;
+
+        if (path == "/")
+        {
+            var sources = await GetDataSourcesAsync();
+            entries = sources.Select(d => new VfsEntry(d.Name, true, 0, d.CreatedAt)).ToList();
+        }
+        else
+        {
+            var parts = path.TrimStart('/').Split('/', 2);
+            var ds = await FindDataSourceByNameAsync(parts[0]);
+            if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+            var subPath = parts.Length > 1 ? parts[1] + "/" : "";
+            entries = await ListDirectoryAsync(ds, subPath);
+        }
+
+        var handle = NextHandle();
+        _handles[handle] = new DirHandle(entries, false);
+        Send(BuildHandlePacket(id, handle));
+    }
+
+    private void HandleReaddir(uint id, SftpReader r)
+    {
+        var handle = r.ReadString();
+        if (!_handles.TryGetValue(handle, out var h) || h is not DirHandle dh)
+        {
+            SendStatus(id, SSH_FX_FAILURE);
+            return;
+        }
+
+        if (dh.Sent)
+        {
+            SendStatus(id, SSH_FX_EOF);
+            return;
+        }
+
+        // Mark as sent — next READDIR will return EOF
+        _handles[handle] = dh with { Sent = true };
+
+        // Build NAME response with all entries
+        Send(BuildPacket(SSH_FXP_NAME, w =>
+        {
+            w.WriteUInt32(id);
+            w.WriteUInt32((uint)dh.Entries.Count);
+            foreach (var e in dh.Entries)
+            {
+                w.WriteString(e.Name);
+                w.WriteString(FormatLongName(e)); // longname (ls -l style)
+                if (e.IsDir) w.WriteAttrs(DirAttrs(e.Modified));
+                else w.WriteAttrs(FileAttrs(e.Size, e.Modified));
+            }
+        }));
+    }
+
+    #endregion
+
+    #region File operations
+
+    private async Task HandleOpen(uint id, SftpReader r)
+    {
+        var path = NormalizePath(r.ReadString());
+        var pflags = r.ReadUInt32();
+        // Skip attrs
+        r.SkipAttrs();
+
+        if (path == "/" || !path.Contains('/'))
+        {
+            SendStatus(id, SSH_FX_PERMISSION_DENIED);
+            return;
+        }
+
+        var parts = path.TrimStart('/').Split('/', 2);
+        var ds = await FindDataSourceByNameAsync(parts[0]);
+        if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+        var subPath = parts[1];
+
+        if ((pflags & SSH_FXF_WRITE) != 0)
+        {
+            if (!IsAuthenticated) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
+
+            // Delete existing file if TRUNC
+            if ((pflags & SSH_FXF_TRUNC) != 0 || (pflags & SSH_FXF_CREAT) != 0)
+            {
+                var existing = await FindFileAsync(ds, subPath);
+                if (existing is not null)
+                    await _fileStorage.DeleteFileAsync(existing);
+            }
+
+            var handle = NextHandle();
+            _handles[handle] = new WriteHandle(ds.Id, subPath, null, new MemoryStream());
+            Send(BuildHandlePacket(id, handle));
+        }
+        else
+        {
+            var file = await FindFileAsync(ds, subPath);
+            if (file is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+            var masterKey = await GetMasterKeyAsync(ds.UserId);
+            var stream = await _fileStorage.OpenDecryptedStreamAsync(file, masterKey);
+
+            var handle = NextHandle();
+            _handles[handle] = new ReadHandle(file, stream, 0);
+            Send(BuildHandlePacket(id, handle));
+        }
+    }
+
+    private async Task HandleRead(uint id, SftpReader r)
+    {
+        var handle = r.ReadString();
+        var offset = r.ReadUInt64();
+        var len = r.ReadUInt32();
+
+        if (!_handles.TryGetValue(handle, out var h) || h is not ReadHandle rh)
+        {
+            SendStatus(id, SSH_FX_FAILURE);
+            return;
+        }
+
+        // Skip forward if needed (streams are sequential)
+        if ((long)offset > rh.Position)
+        {
+            var toSkip = (long)offset - rh.Position;
+            var skipBuf = new byte[Math.Min(8192, toSkip)];
+            while (toSkip > 0)
+            {
+                var read = await rh.Stream.ReadAsync(skipBuf.AsMemory(0, (int)Math.Min(skipBuf.Length, toSkip)));
+                if (read == 0) break;
+                toSkip -= read;
+            }
+        }
+        else if ((long)offset < rh.Position)
+        {
+            SendStatus(id, SSH_FX_EOF);
+            return;
+        }
+
+        var buffer = new byte[Math.Min(len, 32768)];
+        var bytesRead = await rh.Stream.ReadAsync(buffer);
+
+        if (bytesRead == 0)
+        {
+            SendStatus(id, SSH_FX_EOF);
+            return;
+        }
+
+        _handles[handle] = rh with { Position = rh.Position + bytesRead };
+
+        Send(BuildPacket(SSH_FXP_DATA, w =>
+        {
+            w.WriteUInt32(id);
+            w.WriteBytes(buffer.AsSpan(0, bytesRead));
+        }));
+    }
+
+    private void HandleWrite(uint id, SftpReader r)
+    {
+        var handle = r.ReadString();
+        var offset = r.ReadUInt64();
+        var data = r.ReadBytes();
+
+        if (!_handles.TryGetValue(handle, out var h) || h is not WriteHandle wh)
+        {
+            SendStatus(id, SSH_FX_FAILURE);
+            return;
+        }
+
+        wh.Buffer.Position = (long)offset;
+        wh.Buffer.Write(data);
+        SendStatus(id, SSH_FX_OK);
+    }
+
+    private void HandleClose(uint id, SftpReader r)
+    {
+        var handle = r.ReadString();
+        if (!_handles.Remove(handle, out var h))
+        {
+            SendStatus(id, SSH_FX_FAILURE);
+            return;
+        }
+
+        switch (h)
+        {
+            case ReadHandle rh:
+                rh.Stream.Dispose();
+                break;
+            case WriteHandle wh:
+                // Store the file
+                try
+                {
+                    wh.Buffer.Position = 0;
+                    _fileStorage.StoreFileAsync(_userId!.Value, wh.DataSourceId, wh.Path,
+                        wh.ContentType, wh.Buffer).GetAwaiter().GetResult();
+                    wh.Buffer.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to store file via SFTP: {Path}", wh.Path);
+                    wh.Buffer.Dispose();
+                    SendStatus(id, SSH_FX_FAILURE);
+                    return;
+                }
+                break;
+        }
+
+        SendStatus(id, SSH_FX_OK);
+    }
+
+    private async Task HandleRemove(uint id, SftpReader r)
+    {
+        if (!IsAuthenticated) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
+
+        var path = NormalizePath(r.ReadString());
+        var parts = path.TrimStart('/').Split('/', 2);
+        if (parts.Length < 2) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
+
+        var ds = await FindDataSourceByNameAsync(parts[0]);
+        if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+        var file = await FindFileAsync(ds, parts[1]);
+        if (file is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+        await _fileStorage.DeleteFileAsync(file);
+        SendStatus(id, SSH_FX_OK);
+    }
+
+    #endregion
+
+    #region Virtual filesystem helpers
+
+    private bool IsAuthenticated => _userId.HasValue;
+
+    private async Task<List<DataSource>> GetDataSourcesAsync()
+    {
+        if (_userId.HasValue)
+        {
+            return await _db.DataSources
+                .Include(d => d.Frontends)
+                .Where(d => d.UserId == _userId && d.Frontends.Any(f => f.Type == FrontendType.Sftp))
+                .OrderBy(d => d.Name).ToListAsync();
+        }
+
+        // Anonymous: show data sources with anonymous SFTP
+        return await _db.DataSources
+            .Include(d => d.Frontends)
+            .Where(d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous))
+            .OrderBy(d => d.Name).ToListAsync();
+    }
+
+    private async Task<DataSource?> FindDataSourceByNameAsync(string name)
+    {
+        var sources = await GetDataSourcesAsync();
+        return sources.FirstOrDefault(d => d.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<byte[]> GetMasterKeyAsync(Guid ownerId)
+    {
+        var user = await _userManager.FindByIdAsync(ownerId.ToString());
+        return Convert.FromBase64String(user!.MasterKeyBase64);
+    }
+
+    private async Task<List<VfsEntry>> ListDirectoryAsync(DataSource ds, string pathPrefix)
+    {
+        var masterKey = await GetMasterKeyAsync(ds.UserId);
+        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+
+        var files = await _db.EncryptedFiles
+            .Where(f => f.DataSourceId == ds.Id)
+            .ToListAsync();
+
+        var entries = new List<VfsEntry>();
+        var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var f in files)
+        {
+            var iv = Convert.FromBase64String(f.IvBase64);
+            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+
+            if (!string.IsNullOrEmpty(pathPrefix) &&
+                !fullPath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var relativePath = string.IsNullOrEmpty(pathPrefix) ? fullPath : fullPath[pathPrefix.Length..];
+            var slashIdx = relativePath.IndexOf('/');
+
+            if (slashIdx < 0)
+            {
+                entries.Add(new VfsEntry(relativePath, false, f.OriginalFileSize, f.CreatedAt));
+            }
+            else
+            {
+                var folderName = relativePath[..slashIdx];
+                if (seenFolders.Add(folderName))
+                    entries.Add(new VfsEntry(folderName, true, 0, f.CreatedAt));
+            }
+        }
+
+        return entries.OrderBy(e => !e.IsDir).ThenBy(e => e.Name).ToList();
+    }
+
+    private async Task<(VfsEntry? entry, EncryptedFile? file)> FindEntryAsync(DataSource ds, string subPath)
+    {
+        var masterKey = await GetMasterKeyAsync(ds.UserId);
+        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+
+        var files = await _db.EncryptedFiles
+            .Where(f => f.DataSourceId == ds.Id)
+            .ToListAsync();
+
+        // Check for exact file match
+        foreach (var f in files)
+        {
+            var iv = Convert.FromBase64String(f.IvBase64);
+            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+
+            if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+                return (new VfsEntry(Path.GetFileName(subPath), false, f.OriginalFileSize, f.CreatedAt), f);
+        }
+
+        // Check for directory prefix
+        var dirPrefix = subPath.EndsWith('/') ? subPath : subPath + "/";
+        var isDir = files.Any(f =>
+        {
+            var iv = Convert.FromBase64String(f.IvBase64);
+            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+            return fullPath.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase);
+        });
+
+        return isDir
+            ? (new VfsEntry(Path.GetFileName(subPath.TrimEnd('/')), true, 0, DateTimeOffset.UtcNow), null)
+            : (null, null);
+    }
+
+    private async Task<EncryptedFile?> FindFileAsync(DataSource ds, string subPath)
+    {
+        var masterKey = await GetMasterKeyAsync(ds.UserId);
+        var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+
+        var files = await _db.EncryptedFiles
+            .Where(f => f.DataSourceId == ds.Id)
+            .ToListAsync();
+
+        foreach (var f in files)
+        {
+            var iv = Convert.FromBase64String(f.IvBase64);
+            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+            if (string.Equals(fullPath, subPath, StringComparison.OrdinalIgnoreCase))
+                return f;
+        }
+
+        return null;
+    }
+
+    #endregion
+
+    #region Binary protocol helpers
+
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path == ".") return "/";
+        path = path.Replace('\\', '/');
+        if (!path.StartsWith('/')) path = "/" + path;
+        // Resolve ".." segments
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var stack = new Stack<string>();
+        foreach (var seg in segments)
+        {
+            if (seg == "..") { if (stack.Count > 0) stack.Pop(); }
+            else if (seg != ".") stack.Push(seg);
+        }
+        return "/" + string.Join("/", stack.Reverse());
+    }
+
+    private string NextHandle() => $"h{Interlocked.Increment(ref _handleCounter)}";
+
+    private static string FormatLongName(VfsEntry e)
+    {
+        var perms = e.IsDir ? "drwxr-xr-x" : "-rw-r--r--";
+        var size = e.Size.ToString().PadLeft(13);
+        var date = e.Modified.ToString("MMM dd HH:mm");
+        return $"{perms}   1 owner    group    {size} {date} {e.Name}";
+    }
+
+    private static byte[] DirAttrs(DateTimeOffset modified)
+    {
+        return WriteAttrsBytes(ATTR_PERMS | ATTR_ACMODTIME, 0, DIR_MODE, modified);
+    }
+
+    private static byte[] FileAttrs(long size, DateTimeOffset modified)
+    {
+        return WriteAttrsBytes(ATTR_SIZE | ATTR_PERMS | ATTR_ACMODTIME, size, FILE_MODE, modified);
+    }
+
+    private static byte[] WriteAttrsBytes(uint flags, long size, uint perms, DateTimeOffset modified)
+    {
+        using var ms = new MemoryStream();
+        var w = new SftpWriter(ms);
+        w.WriteUInt32(flags);
+        if ((flags & ATTR_SIZE) != 0) w.WriteUInt64((ulong)size);
+        if ((flags & ATTR_PERMS) != 0) w.WriteUInt32(perms);
+        if ((flags & ATTR_ACMODTIME) != 0)
+        {
+            var unix = (uint)modified.ToUnixTimeSeconds();
+            w.WriteUInt32(unix);
+            w.WriteUInt32(unix);
+        }
+        return ms.ToArray();
+    }
+
+    private void SendStatus(uint requestId, uint code, string message = "")
+    {
+        Send(BuildPacket(SSH_FXP_STATUS, w =>
+        {
+            w.WriteUInt32(requestId);
+            w.WriteUInt32(code);
+            w.WriteString(message);
+            w.WriteString("en");
+        }));
+    }
+
+    private static byte[] BuildHandlePacket(uint requestId, string handle)
+    {
+        return BuildPacket(SSH_FXP_HANDLE, w =>
+        {
+            w.WriteUInt32(requestId);
+            w.WriteString(handle);
+        });
+    }
+
+    private static byte[] BuildNamePacket(uint requestId, string name, byte[] attrs)
+    {
+        return BuildPacket(SSH_FXP_NAME, w =>
+        {
+            w.WriteUInt32(requestId);
+            w.WriteUInt32(1); // count
+            w.WriteString(name);
+            w.WriteString(name); // longname
+            w.WriteRaw(attrs);
+        });
+    }
+
+    private static byte[] BuildAttrsPacket(uint requestId, byte[] attrs)
+    {
+        return BuildPacket(SSH_FXP_ATTRS, w =>
+        {
+            w.WriteUInt32(requestId);
+            w.WriteRaw(attrs);
+        });
+    }
+
+    private static byte[] BuildPacket(byte type, Action<SftpWriter> write)
+    {
+        using var ms = new MemoryStream();
+        var w = new SftpWriter(ms);
+        w.WriteUInt32(0); // placeholder for length
+        ms.WriteByte(type);
+        write(w);
+
+        var data = ms.ToArray();
+        BinaryPrimitives.WriteUInt32BigEndian(data, (uint)(data.Length - 4));
+        return data;
+    }
+
+    #endregion
+
+    #region Dispose
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        _cts.Cancel();
+        _inbound.Writer.TryComplete();
+
+        foreach (var h in _handles.Values)
+        {
+            if (h is ReadHandle rh) rh.Stream.Dispose();
+            if (h is WriteHandle wh) wh.Buffer.Dispose();
+        }
+        _handles.Clear();
+
+        _scope.Dispose();
+        _cts.Dispose();
+    }
+
+    #endregion
+
+    #region Binary reader/writer
+
+    private sealed class SftpReader
+    {
+        private readonly byte[] _data;
+        private int _pos;
+
+        public SftpReader(byte[] data) { _data = data; _pos = 0; }
+
+        public uint ReadUInt32()
+        {
+            var val = BinaryPrimitives.ReadUInt32BigEndian(_data.AsSpan(_pos, 4));
+            _pos += 4;
+            return val;
+        }
+
+        public ulong ReadUInt64()
+        {
+            var val = BinaryPrimitives.ReadUInt64BigEndian(_data.AsSpan(_pos, 8));
+            _pos += 8;
+            return val;
+        }
+
+        public string ReadString()
+        {
+            var len = (int)ReadUInt32();
+            var s = Encoding.UTF8.GetString(_data, _pos, len);
+            _pos += len;
+            return s;
+        }
+
+        public byte[] ReadBytes()
+        {
+            var len = (int)ReadUInt32();
+            var result = new byte[len];
+            Buffer.BlockCopy(_data, _pos, result, 0, len);
+            _pos += len;
+            return result;
+        }
+
+        public void SkipAttrs()
+        {
+            if (_pos >= _data.Length) return;
+            var flags = ReadUInt32();
+            if ((flags & ATTR_SIZE) != 0) _pos += 8;
+            if ((flags & ATTR_UIDGID) != 0) _pos += 8;
+            if ((flags & ATTR_PERMS) != 0) _pos += 4;
+            if ((flags & ATTR_ACMODTIME) != 0) _pos += 8;
+        }
+    }
+
+    private sealed class SftpWriter(Stream stream)
+    {
+        public void WriteUInt32(uint value)
+        {
+            Span<byte> buf = stackalloc byte[4];
+            BinaryPrimitives.WriteUInt32BigEndian(buf, value);
+            stream.Write(buf);
+        }
+
+        public void WriteUInt64(ulong value)
+        {
+            Span<byte> buf = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt64BigEndian(buf, value);
+            stream.Write(buf);
+        }
+
+        public void WriteString(string s)
+        {
+            var bytes = Encoding.UTF8.GetBytes(s);
+            WriteUInt32((uint)bytes.Length);
+            stream.Write(bytes);
+        }
+
+        public void WriteBytes(ReadOnlySpan<byte> data)
+        {
+            WriteUInt32((uint)data.Length);
+            stream.Write(data);
+        }
+
+        public void WriteRaw(byte[] data) => stream.Write(data);
+
+        public void WriteAttrs(byte[] attrs) => stream.Write(attrs);
+    }
+
+    #endregion
+}
