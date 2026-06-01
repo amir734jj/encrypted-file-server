@@ -12,13 +12,16 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
     public string ProviderKey => "ftp-client";
 
     public async Task<(Stream stream, string storagePath)> OpenWriteAsync(
-        BackendConnectionInfo connection, Guid fileId, CancellationToken ct = default)
+        BackendConnectionInfo connection, string relativePath, CancellationToken ct = default)
     {
-        var storagePath = $"{connection.BasePath.TrimEnd('/')}/{fileId}.enc";
+        var storagePath = $"{connection.BasePath.TrimEnd('/')}/{relativePath}";
         var client = await ConnectAsync(connection, ct);
 
+        var dir = Path.GetDirectoryName(storagePath)?.Replace('\\', '/');
+        if (!string.IsNullOrEmpty(dir) && !await client.DirectoryExists(dir, ct))
+            await client.CreateDirectory(dir, ct);
+
         var stream = await client.OpenWrite(storagePath, token: ct);
-        // Wrap in a stream that disposes the FTP client when done writing
         return (new FtpWriteStream(stream, client), storagePath);
     }
 

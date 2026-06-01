@@ -3,6 +3,7 @@ using Api.Extensions;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
 using Shared.Interfaces;
+using Shared.Models;
 using EfCoreRepository.Extensions;
 
 namespace Api.Services;
@@ -26,12 +27,14 @@ public sealed class FileStorageService(
 
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var isNone = ds.Backend.EncryptionMethod == EncryptionMethod.None;
 
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var fileId = Guid.NewGuid();
         var connection = ds.ToBackendConnectionInfo();
+        var relativePath = isNone ? fileName : $"{fileId}.enc";
 
-        var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, fileId);
+        var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, relativePath);
 
         byte[] iv;
         await using (destinationStream)
@@ -73,12 +76,14 @@ public sealed class FileStorageService(
 
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var isNone = ds.Backend.EncryptionMethod == EncryptionMethod.None;
 
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var fileId = Guid.NewGuid();
         var connection = ds.ToBackendConnectionInfo();
+        var relativePath = isNone ? fileName : $"{fileId}.enc";
 
-        var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, fileId);
+        var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, relativePath);
         var (cryptoStream, iv) = encryption.CreateEncryptingStream(destinationStream, masterKey);
 
         return new StreamingWriteHandle(cryptoStream, destinationStream, async bytesWritten =>

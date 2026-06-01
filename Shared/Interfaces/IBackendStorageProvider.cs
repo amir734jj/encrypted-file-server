@@ -9,8 +9,8 @@ public interface IBackendStorageProvider
     /// <summary>Unique key identifying this provider (e.g. "ftp-client", "s3").</summary>
     string ProviderKey { get; }
 
-    /// <summary>Opens a writable stream to a new storage location on the remote backend.</summary>
-    Task<(Stream stream, string storagePath)> OpenWriteAsync(BackendConnectionInfo connection, Guid fileId, CancellationToken ct = default);
+    /// <summary>Opens a writable stream to a storage location on the remote backend.</summary>
+    Task<(Stream stream, string storagePath)> OpenWriteAsync(BackendConnectionInfo connection, string relativePath, CancellationToken ct = default);
 
     /// <summary>Opens a readable stream from an existing storage location on the remote backend.</summary>
     Task<Stream> OpenReadAsync(BackendConnectionInfo connection, string storagePath, CancellationToken ct = default);
