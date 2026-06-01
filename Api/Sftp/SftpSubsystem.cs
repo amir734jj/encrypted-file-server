@@ -56,7 +56,11 @@ public sealed class SftpSubsystem : IDisposable
     // Handle types
     private sealed record DirHandle(List<VfsEntry> Entries, int Offset);
     private sealed record ReadHandle(EncryptedFile File, Stream Stream, long Position);
-    private sealed record WriteHandle(StreamingWriteHandle Context, long Position);
+    private sealed class WriteHandle(StreamingWriteHandle context)
+    {
+        public StreamingWriteHandle Context { get; } = context;
+        public long Position;
+    }
     private sealed record VfsEntry(string Name, bool IsDir, long Size, DateTimeOffset Modified);
 
     // State
@@ -385,7 +389,7 @@ public sealed class SftpSubsystem : IDisposable
 
             var ctx = await _fileStorage.OpenWriteStreamAsync(_userId!.Value, ds.Id, subPath, null);
             var handle = NextHandle();
-            _handles[handle] = new WriteHandle(ctx, 0);
+            _handles[handle] = new WriteHandle(ctx);
             Send(BuildHandlePacket(id, handle));
         }
         else
@@ -477,7 +481,7 @@ public sealed class SftpSubsystem : IDisposable
         }
 
         await wh.Context.Stream.WriteAsync(data);
-        _handles[handle] = wh with { Position = wh.Position + data.Length };
+        wh.Position += data.Length;
         SendStatus(id, SSH_FX_OK);
     }
 

@@ -74,6 +74,9 @@ else
                             }
                         </td>
                         <td>
+                            <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" OnClick="() => ShowExtendModal(ticket)" CssClass="me-1">
+                                <i class="bi bi-clock-history"></i>
+                            </HxButton>
                             <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" OnClick="() => DeleteTicket(ticket)">
                                 <i class="bi bi-trash"></i>
                             </HxButton>
@@ -115,11 +118,42 @@ else
     </FooterTemplate>
 </HxModal>
 
+<HxModal @ref="_extendModal" Title="Extend Access Ticket" Size="ModalSize.Regular">
+    <BodyTemplate>
+        @if (_extendingTicket is not null)
+        {
+            <p class="mb-2">
+                Extending ticket for <strong><code>@_extendingTicket.Username</code></strong>.
+                Currently expires <strong>@_extendingTicket.ExpiresAt.LocalDateTime.ToString("g")</strong>.
+            </p>
+            <div class="mb-3">
+                <label class="form-label">Extend by</label>
+                <HxSelect TItem="ExpirationOption" TValue="ExpirationOption"
+                          Data="_expirationOptions"
+                          @bind-Value="_selectedExtendDuration"
+                          TextSelector="@(o => o.Label)"
+                          ValueSelector="@(o => o)"
+                          Nullable="false" />
+            </div>
+            <p class="text-muted small">
+                New expiration: <strong>@((_extendingTicket.ExpiresAt < DateTimeOffset.UtcNow ? DateTimeOffset.UtcNow : _extendingTicket.ExpiresAt).Add(_selectedExtendDuration.Duration).LocalDateTime.ToString("g"))</strong>
+            </p>
+        }
+    </BodyTemplate>
+    <FooterTemplate>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _extendModal!.HideAsync()">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Warning" OnClick="ExtendTicket">Extend</HxButton>
+    </FooterTemplate>
+</HxModal>
+
 @code {
     private List<AccessTicketDto>? _tickets;
     private AccessTicketCreatedDto? _createdTicket;
     private HxModal? _createModal;
+    private HxModal? _extendModal;
+    private AccessTicketDto? _extendingTicket;
     private ExpirationOption _selectedExpiration = ExpirationOptions[1]; // 1 day default
+    private ExpirationOption _selectedExtendDuration = ExpirationOptions[1]; // 1 day default
 
     private static readonly ExpirationOption[] ExpirationOptions =
     [
@@ -183,6 +217,36 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to revoke ticket: {ex.Message}");
+        }
+    }
+
+    private async Task ShowExtendModal(AccessTicketDto ticket)
+    {
+        _extendingTicket = ticket;
+        _selectedExtendDuration = ExpirationOptions[1];
+        await _extendModal!.ShowAsync();
+    }
+
+    private async Task ExtendTicket()
+    {
+        if (_extendingTicket is null) return;
+
+        try
+        {
+            var baseTime = _extendingTicket.ExpiresAt < DateTimeOffset.UtcNow
+                ? DateTimeOffset.UtcNow
+                : _extendingTicket.ExpiresAt;
+            var newExpiration = baseTime + _selectedExtendDuration.Duration;
+            var req = new ExtendAccessTicketRequest(newExpiration);
+            await Api.ExtendTicketAsync(_extendingTicket.Id, req);
+            await _extendModal!.HideAsync();
+            _extendingTicket = null;
+            await LoadAsync();
+            Messenger.AddInformation("Ticket extended.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to extend ticket: {ex.Message}");
         }
     }
 

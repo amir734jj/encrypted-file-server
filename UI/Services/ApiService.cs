@@ -102,4 +102,5 @@ public sealed class ApiService(
     public Task<List<AccessTicketDto>> GetTicketsAsync() => ticketsApi.GetAllAsync();
     public Task<AccessTicketCreatedDto> CreateTicketAsync(CreateAccessTicketRequest req) => ticketsApi.CreateAsync(req);
     public Task DeleteTicketAsync(Guid id) => ticketsApi.DeleteAsync(id);
+    public Task<AccessTicketDto> ExtendTicketAsync(Guid id, ExtendAccessTicketRequest req) => ticketsApi.ExtendAsync(id, req);
 }

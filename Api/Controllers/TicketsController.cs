@@ -60,6 +60,26 @@ public sealed class TicketsController(IEfRepository repository) : ControllerBase
         return NoContent();
     }
 
+    [HttpPatch("{id:guid}")]
+    public async Task<IActionResult> Extend(Guid id, [FromBody] ExtendAccessTicketRequest req)
+    {
+        if (req.ExpiresAt <= DateTimeOffset.UtcNow)
+            return BadRequest("Expiration must be in the future.");
+
+        var tickets = (await TicketDal.GetAll(
+            filterExprs: [t => t.Id == id && t.UserId == CurrentUserId],
+            project: t => t,
+            maxResults: 1)).ToList();
+
+        if (tickets.Count == 0)
+            return NotFound();
+
+        await TicketDal.Update(id, t => t.ExpiresAt = req.ExpiresAt);
+
+        var updated = tickets.First();
+        return Ok(new AccessTicketDto(updated.Id, updated.Username, updated.Password, updated.CreatedAt, req.ExpiresAt));
+    }
+
     private static string GenerateRandomString(int length)
     {
         const string chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";

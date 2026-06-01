@@ -15,3 +15,5 @@ public record AccessTicketCreatedDto(
     DateTimeOffset ExpiresAt);
 
 public record CreateAccessTicketRequest(DateTimeOffset ExpiresAt);
+
+public record ExtendAccessTicketRequest(DateTimeOffset ExpiresAt);

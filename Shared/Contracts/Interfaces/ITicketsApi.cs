@@ -13,4 +13,7 @@ public interface ITicketsApi
 
     [Delete("/api/tickets/{id}")]
     Task DeleteAsync(Guid id);
+
+    [Patch("/api/tickets/{id}")]
+    Task<AccessTicketDto> ExtendAsync(Guid id, [Body] ExtendAccessTicketRequest request);
 }
