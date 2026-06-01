@@ -14,7 +14,6 @@ RUN apk add --no-cache krb5-libs
 
 COPY --from=build /app/publish .
 COPY --from=build /app/ui-publish/wwwroot ./wwwroot
-RUN mkdir -p /app/storage
 
 EXPOSE 5000 2121 2222 50000-50100
 
