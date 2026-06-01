@@ -27,8 +27,18 @@ public sealed class BrowseController(
     public async Task<IActionResult> ListUsers()
     {
         var userId = GetAuthenticatedUserId();
+
+        // Try HTTP Basic auth via access tickets
         if (userId is null)
-            return Challenge();
+        {
+            userId = await TryBasicAuthUserId();
+        }
+
+        if (userId is null)
+        {
+            Response.Headers["WWW-Authenticate"] = "Basic realm=\"File Server\"";
+            return Unauthorized();
+        }
 
         var dataSources = (await DataSourceDal.GetAll(
             filterExprs: [d => d.UserId == userId],
@@ -118,6 +128,38 @@ public sealed class BrowseController(
         if (User.Identity?.IsAuthenticated == true)
             return User.GetUserId();
         return null;
+    }
+
+    private async Task<Guid?> TryBasicAuthUserId()
+    {
+        var authHeader = Request.Headers.Authorization.ToString();
+        if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var encoded = authHeader["Basic ".Length..].Trim();
+        var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+        var colonIdx = decoded.IndexOf(':');
+        var username = colonIdx >= 0 ? decoded[..colonIdx] : decoded;
+        var password = colonIdx >= 0 ? decoded[(colonIdx + 1)..] : string.Empty;
+
+        var tickets = (await TicketDal.GetAll(
+            filterExprs: [t => t.Username == username
+                && t.Password == password
+                && t.ExpiresAt > DateTimeOffset.UtcNow],
+            project: t => t,
+            maxResults: 1)).ToList();
+
+        if (tickets.Count == 0)
+            return null;
+
+        var ticket = tickets.First();
+
+        // Reject if the ticket owner's account is disabled
+        var ticketOwner = await userManager.FindByIdAsync(ticket.UserId.ToString());
+        if (ticketOwner is null || !ticketOwner.IsActive)
+            return null;
+
+        return ticket.UserId;
     }
 
     private async Task<(DataSource? ds, byte[]? masterKey, IActionResult? error)> AuthorizeDataSource(Guid dataSourceId)
