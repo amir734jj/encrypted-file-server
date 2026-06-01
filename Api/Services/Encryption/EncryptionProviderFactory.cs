@@ -1,7 +1,7 @@
 using Api.Interfaces;
 using Shared.Interfaces;
 
-namespace Api.Services;
+namespace Api.Services.Encryption;
 
 public sealed class EncryptionProviderFactory : IEncryptionProviderFactory
 {

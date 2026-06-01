@@ -3,8 +3,9 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Shared.Interfaces;
+using CryptoAesGcm = System.Security.Cryptography.AesGcm;
 
-namespace Api.Services;
+namespace Api.Services.Encryption.AesGcm;
 
 public sealed class AesGcmEncryptionProvider : IEncryptionProvider
 {
@@ -30,7 +31,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         var data = Encoding.UTF8.GetBytes(plaintext);
         var ciphertext = new byte[data.Length];
         var tag = new byte[TagSize];
-        using var aes = new AesGcm(masterKey, TagSize);
+        using var aes = new CryptoAesGcm(masterKey, TagSize);
         aes.Encrypt(iv, data, ciphertext, tag);
         var result = new byte[tag.Length + ciphertext.Length];
         Buffer.BlockCopy(tag, 0, result, 0, tag.Length);
@@ -44,7 +45,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
         var tag = combined.AsSpan(0, TagSize);
         var encrypted = combined.AsSpan(TagSize);
         var plaintext = new byte[encrypted.Length];
-        using var aes = new AesGcm(masterKey, TagSize);
+        using var aes = new CryptoAesGcm(masterKey, TagSize);
         aes.Decrypt(iv, encrypted, tag, plaintext);
         return Encoding.UTF8.GetString(plaintext);
     }
@@ -84,7 +85,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
             var tag = new byte[TagSize];
             var nonce = DeriveChunkNonce();
 
-            using var aes = new AesGcm(key, TagSize);
+            using var aes = new CryptoAesGcm(key, TagSize);
             aes.Encrypt(nonce, plaintext, ciphertext, tag);
 
             // Write: [4-byte chunk length][16-byte tag][ciphertext]
@@ -170,7 +171,7 @@ public sealed class AesGcmEncryptionProvider : IEncryptionProvider
 
             _decryptedChunk = new byte[plainLen];
             var nonce = DeriveChunkNonce();
-            using var aes = new AesGcm(key, TagSize);
+            using var aes = new CryptoAesGcm(key, TagSize);
             aes.Decrypt(nonce, ciphertext, tag, _decryptedChunk);
             _chunkPos = 0;
             _chunkLen = plainLen;
