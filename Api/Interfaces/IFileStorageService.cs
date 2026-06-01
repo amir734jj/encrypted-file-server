@@ -6,7 +6,7 @@ public interface IFileStorageService
 {
     Task<EncryptedFile> StoreFileAsync(Guid userId, Guid dataSourceId, string fileName, string? contentType, Stream content);
     Task<StreamingWriteHandle> OpenWriteStreamAsync(Guid userId, Guid dataSourceId, string fileName, string? contentType);
-    Task<Stream> OpenDecryptedStreamAsync(EncryptedFile file, byte[] masterKey);
+    Task<Stream> OpenDecryptedStreamAsync(EncryptedFile file);
     Task<bool> DeleteFileAsync(EncryptedFile file);
 }
 

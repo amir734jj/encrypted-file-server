@@ -5,6 +5,5 @@ namespace Api.Data.Entities;
 public sealed class FrontendConfig
 {
     public FrontendType Type { get; set; }
-    public string? Password { get; set; }
     public bool AllowAnonymous { get; set; }
 }

@@ -105,6 +105,10 @@ else
         <div class="mb-3">
             <HxSwitch @bind-Value="_backendSsl" Text="Use SSL/TLS" />
         </div>
+        <div class="mb-3">
+            <HxInputText Label="Master Password" @bind-Value="_masterPassword" Type="InputType.Password"
+                         Hint="Encryption key for files. Use the same password to re-attach to existing backends." />
+        </div>
 
         <h6 class="text-muted mb-2 mt-4">Frontend Access</h6>
         <div class="mb-2">
@@ -113,10 +117,6 @@ else
             {
                 <div class="ms-4 mt-1">
                     <HxSwitch @bind-Value="_ftpAnon" Text="Allow Anonymous" />
-                    @if (_editFtpPassword is not null)
-                    {
-                        <small class="text-muted d-block mt-1">FTP Password: <code>@_editFtpPassword</code></small>
-                    }
                 </div>
             }
         </div>
@@ -126,14 +126,19 @@ else
             {
                 <div class="ms-4 mt-1">
                     <HxSwitch @bind-Value="_httpAnon" Text="Allow Anonymous" />
-                    @if (_editHttpPassword is not null)
-                    {
-                        <small class="text-muted d-block mt-1">HTTP Password: <code>@_editHttpPassword</code></small>
-                    }
                 </div>
             }
         </div>
-        <small class="text-muted">Username is your email. Passwords are auto-generated when a frontend is first enabled.</small>
+        <div class="mb-2">
+            <HxSwitch @bind-Value="_sftpEnabled" Text="Enable SFTP Server" />
+            @if (_sftpEnabled)
+            {
+                <div class="ms-4 mt-1">
+                    <HxSwitch @bind-Value="_sftpAnon" Text="Allow Anonymous" />
+                </div>
+            }
+        </div>
+        <small class="text-muted">Username/password for frontends is the same as your website login.</small>
     </BodyTemplate>
     <FooterTemplate>
         <HxButton Color="ThemeColor.Secondary" OnClick="() => _showModal = false">Cancel</HxButton>
@@ -156,13 +161,14 @@ else
     private string _backendPass = string.Empty;
     private string _backendPath = "/";
     private bool _backendSsl;
+    private string _masterPassword = string.Empty;
     private bool _ftpEnabled;
     private bool _ftpAnon;
     private bool _httpEnabled;
     private bool _httpAnon;
+    private bool _sftpEnabled;
+    private bool _sftpAnon;
     private EncryptionMethod _encryptionMethod = EncryptionMethod.AesCtr256;
-    private string? _editFtpPassword;
-    private string? _editHttpPassword;
 
     protected override async Task OnInitializedAsync()
     {
@@ -193,13 +199,14 @@ else
         _backendPass = string.Empty;
         _backendPath = "/";
         _backendSsl = false;
+        _masterPassword = string.Empty;
         _ftpEnabled = false;
         _ftpAnon = false;
         _httpEnabled = false;
         _httpAnon = false;
+        _sftpEnabled = false;
+        _sftpAnon = false;
         _encryptionMethod = EncryptionMethod.AesCtr256;
-        _editFtpPassword = null;
-        _editHttpPassword = null;
         _showModal = true;
     }
 
@@ -213,29 +220,33 @@ else
         _backendPass = string.Empty; // Don't pre-fill password
         _backendPath = ds.Backend.BasePath;
         _backendSsl = ds.Backend.UseSsl;
+        _masterPassword = string.Empty; // Don't pre-fill master password
         var ftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Ftp);
         var httpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
+        var sftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Sftp);
         _ftpEnabled = ftpFrontend is not null;
         _ftpAnon = ftpFrontend?.AllowAnonymous ?? false;
         _httpEnabled = httpFrontend is not null;
         _httpAnon = httpFrontend?.AllowAnonymous ?? false;
+        _sftpEnabled = sftpFrontend is not null;
+        _sftpAnon = sftpFrontend?.AllowAnonymous ?? false;
         _encryptionMethod = ds.Backend.EncryptionMethod;
-        _editFtpPassword = ftpFrontend?.Password;
-        _editHttpPassword = httpFrontend?.Password;
         _showModal = true;
     }
 
     private bool IsFormValid() =>
-        !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_backendHost);
+        !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_backendHost)
+        && !string.IsNullOrWhiteSpace(_masterPassword);
 
     private async Task SaveDataSource()
     {
         try
         {
-            var backend = new BackendRequest(_backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl, _encryptionMethod);
+            var backend = new BackendRequest(_backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl, _encryptionMethod, _masterPassword);
             var frontends = new List<FrontendRequest>();
             if (_ftpEnabled) frontends.Add(new FrontendRequest(FrontendType.Ftp, _ftpAnon));
             if (_httpEnabled) frontends.Add(new FrontendRequest(FrontendType.Http, _httpAnon));
+            if (_sftpEnabled) frontends.Add(new FrontendRequest(FrontendType.Sftp, _sftpAnon));
 
             if (_editId.HasValue)
             {

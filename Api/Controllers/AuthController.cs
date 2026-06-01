@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -45,7 +44,6 @@ public sealed class AuthController(
             UserName = req.Email,
             Email = req.Email,
             IsActive = isFirstUser,
-            MasterKeyBase64 = GenerateMasterKey()
         };
 
         var result = await users.CreateAsync(user, req.Password);
@@ -124,12 +122,5 @@ public sealed class AuthController(
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
 
         return new JwtSecurityTokenHandler().WriteToken(token);
-    }
-
-    private static string GenerateMasterKey()
-    {
-        var key = new byte[32]; // 256-bit
-        RandomNumberGenerator.Fill(key);
-        return Convert.ToBase64String(key);
     }
 }

@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Text;
 using System.Web;
 using Api.Data.Entities;
@@ -63,7 +62,7 @@ public sealed class BrowseController(
                 var contentType = file.ContentType is not null
                     ? encryption.DecryptString(file.ContentType, masterKey!, iv)
                     : "application/octet-stream";
-                var stream = await fileStorage.OpenDecryptedStreamAsync(file, masterKey!);
+                var stream = await fileStorage.OpenDecryptedStreamAsync(file);
                 return File(stream, contentType, fileName);
             }
         }
@@ -136,12 +135,10 @@ public sealed class BrowseController(
         if (httpFrontend is null)
             return (null, null, NotFound());
 
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+
         if (httpFrontend.AllowAnonymous)
-        {
-            var user = await users.FindByIdAsync(ds.UserId.ToString());
-            if (user is null) return (null, null, NotFound());
-            return (ds, Convert.FromBase64String(user.MasterKeyBase64), null);
-        }
+            return (ds, masterKey, null);
 
         if (User.Identity?.IsAuthenticated == true)
         {
@@ -149,22 +146,24 @@ public sealed class BrowseController(
             if (currentUserId != ds.UserId)
                 return (null, null, Forbid());
 
-            var user = await users.FindByIdAsync(currentUserId.ToString());
-            return (ds, Convert.FromBase64String(user!.MasterKeyBase64), null);
+            return (ds, masterKey, null);
         }
 
+        // HTTP Basic auth — validate against ASP.NET Identity
         var authHeader = Request.Headers.Authorization.ToString();
         if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
             var encoded = authHeader["Basic ".Length..].Trim();
             var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            var password = decoded.Contains(':') ? decoded[(decoded.IndexOf(':') + 1)..] : decoded;
+            var colonIdx = decoded.IndexOf(':');
+            var username = colonIdx >= 0 ? decoded[..colonIdx] : decoded;
+            var password = colonIdx >= 0 ? decoded[(colonIdx + 1)..] : string.Empty;
 
-            if (httpFrontend.Password is not null && password == httpFrontend.Password)
+            var user = await users.FindByEmailAsync(username);
+            if (user is not null && user.IsActive && user.Id == ds.UserId
+                && await users.CheckPasswordAsync(user, password))
             {
-                var user = await users.FindByIdAsync(ds.UserId.ToString());
-                if (user is null) return (null, null, NotFound());
-                return (ds, Convert.FromBase64String(user.MasterKeyBase64), null);
+                return (ds, masterKey, null);
             }
         }
 

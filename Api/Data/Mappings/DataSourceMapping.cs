@@ -29,6 +29,7 @@ public sealed class DataSourceMapping : IEntityTypeConfiguration<DataSource>
                 .HasMaxLength(50)
                 .HasDefaultValue(EncryptionMethod.AesCtr256)
                 .HasColumnName("EncryptionMethod");
+            b.Property(x => x.MasterPassword).HasMaxLength(500).IsRequired().HasColumnName("BackendMasterPassword");
         });
 
         builder.OwnsMany(d => d.Frontends, f =>
@@ -37,7 +38,6 @@ public sealed class DataSourceMapping : IEntityTypeConfiguration<DataSource>
             f.Property<int>("Id").ValueGeneratedOnAdd();
             f.HasKey("Id");
             f.Property(x => x.Type).HasConversion<string>().HasMaxLength(20);
-            f.Property(x => x.Password).HasMaxLength(200);
             f.ToTable("DataSourceFrontends");
         });
     }

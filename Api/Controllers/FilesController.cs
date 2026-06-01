@@ -3,7 +3,6 @@ using Api.Extensions;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Contracts;
 using Shared.Interfaces;
@@ -16,8 +15,7 @@ namespace Api.Controllers;
 public sealed class FilesController(
     IEfRepository repository,
     IFileStorageService fileStorage,
-    IEncryptionProviderFactory encryptionFactory,
-    UserManager<User> users) : ControllerBase
+    IEncryptionProviderFactory encryptionFactory) : ControllerBase
 {
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
@@ -26,12 +24,9 @@ public sealed class FilesController(
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid dataSourceId, [FromQuery] string path = "")
     {
-        var user = await users.FindByIdAsync(CurrentUserId.ToString());
-        if (user is null) return Unauthorized();
-        var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
-
         var ds = await GetDataSource(dataSourceId);
         if (ds is null) return NotFound();
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         path = NormalizePath(path);
@@ -101,8 +96,7 @@ public sealed class FilesController(
         var ds = await GetDataSource(dataSourceId);
         var encryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
         var iv = Convert.FromBase64String(entity.IvBase64);
-        var user = await users.FindByIdAsync(CurrentUserId.ToString());
-        var masterKey = Convert.FromBase64String(user!.MasterKeyBase64);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
 
         return Ok(new FileEntryDto(
             entity.Id, entity.DataSourceId,
@@ -125,12 +119,9 @@ public sealed class FilesController(
         if (ds is null) return NotFound();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
-        var user = await users.FindByIdAsync(CurrentUserId.ToString());
-        if (user is null) return NotFound();
-
-        var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var iv = Convert.FromBase64String(file.IvBase64);
-        var stream = await fileStorage.OpenDecryptedStreamAsync(file, masterKey);
+        var stream = await fileStorage.OpenDecryptedStreamAsync(file);
         var fullPath = encryption.DecryptString(file.OriginalFileName, masterKey, iv);
         var fileName = Path.GetFileName(fullPath);
         var contentType = file.ContentType is not null
@@ -160,12 +151,9 @@ public sealed class FilesController(
         if (string.IsNullOrEmpty(path))
             return BadRequest("Cannot delete root folder.");
 
-        var user = await users.FindByIdAsync(CurrentUserId.ToString());
-        if (user is null) return Unauthorized();
-        var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
-
         var ds = await GetDataSource(dataSourceId);
         if (ds is null) return NotFound();
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var allFiles = (await FileDal.GetAll(

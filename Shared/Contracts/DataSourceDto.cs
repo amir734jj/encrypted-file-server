@@ -21,5 +21,4 @@ public record BackendDto(
 
 public record FrontendDto(
     FrontendType Type,
-    string? Password,
     bool AllowAnonymous);

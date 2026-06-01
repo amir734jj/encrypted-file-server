@@ -2,10 +2,10 @@ using System.Buffers.Binary;
 using System.Text;
 using Api.Data;
 using Api.Data.Entities;
+using Api.Extensions;
 using Api.Interfaces;
 using FxSsh;
 using FxSsh.Services;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
 using Shared.Models;
@@ -59,7 +59,6 @@ public sealed class SftpSubsystem : IDisposable
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly IEncryptionProviderFactory _encryptionFactory;
-    private readonly UserManager<User> _userManager;
     private readonly Dictionary<string, object> _handles = new();
     private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
@@ -77,7 +76,6 @@ public sealed class SftpSubsystem : IDisposable
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
-        _userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
     }
 
     public void Start()
@@ -372,8 +370,8 @@ public sealed class SftpSubsystem : IDisposable
             var file = await FindFileAsync(ds, subPath);
             if (file is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
 
-            var masterKey = await GetMasterKeyAsync(ds.UserId);
-            var stream = await _fileStorage.OpenDecryptedStreamAsync(file, masterKey);
+            var masterKey = await GetMasterKeyAsync(ds);
+            var stream = await _fileStorage.OpenDecryptedStreamAsync(file);
 
             var handle = NextHandle();
             _handles[handle] = new ReadHandle(file, stream, 0);
@@ -532,15 +530,14 @@ public sealed class SftpSubsystem : IDisposable
         return sources.FirstOrDefault(d => d.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task<byte[]> GetMasterKeyAsync(Guid ownerId)
+    private Task<byte[]> GetMasterKeyAsync(DataSource ds)
     {
-        var user = await _userManager.FindByIdAsync(ownerId.ToString());
-        return Convert.FromBase64String(user!.MasterKeyBase64);
+        return Task.FromResult(KeyDerivation.DeriveKey(ds.Backend.MasterPassword));
     }
 
     private async Task<List<VfsEntry>> ListDirectoryAsync(DataSource ds, string pathPrefix)
     {
-        var masterKey = await GetMasterKeyAsync(ds.UserId);
+        var masterKey = await GetMasterKeyAsync(ds);
         var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var files = await _db.EncryptedFiles
@@ -579,7 +576,7 @@ public sealed class SftpSubsystem : IDisposable
 
     private async Task<(VfsEntry? entry, EncryptedFile? file)> FindEntryAsync(DataSource ds, string subPath)
     {
-        var masterKey = await GetMasterKeyAsync(ds.UserId);
+        var masterKey = await GetMasterKeyAsync(ds);
         var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var files = await _db.EncryptedFiles
@@ -612,7 +609,7 @@ public sealed class SftpSubsystem : IDisposable
 
     private async Task<EncryptedFile?> FindFileAsync(DataSource ds, string subPath)
     {
-        var masterKey = await GetMasterKeyAsync(ds.UserId);
+        var masterKey = await GetMasterKeyAsync(ds);
         var encryption = _encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
 
         var files = await _db.EncryptedFiles

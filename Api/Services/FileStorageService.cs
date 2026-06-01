@@ -2,7 +2,6 @@ using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
-using Microsoft.AspNetCore.Identity;
 using Shared.Interfaces;
 using EfCoreRepository.Extensions;
 
@@ -11,8 +10,7 @@ namespace Api.Services;
 public sealed class FileStorageService(
     IEfRepository repository,
     IEncryptionProviderFactory encryptionFactory,
-    IBackendStorageProvider storage,
-    UserManager<User> userManager) : IFileStorageService
+    IBackendStorageProvider storage) : IFileStorageService
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
@@ -28,10 +26,8 @@ public sealed class FileStorageService(
 
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
-        var user = await userManager.FindByIdAsync(userId.ToString())
-            ?? throw new InvalidOperationException("User not found.");
 
-        var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var fileId = Guid.NewGuid();
         var connection = ds.ToBackendConnectionInfo();
 
@@ -77,10 +73,8 @@ public sealed class FileStorageService(
 
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
-        var user = await userManager.FindByIdAsync(userId.ToString())
-            ?? throw new InvalidOperationException("User not found.");
 
-        var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var fileId = Guid.NewGuid();
         var connection = ds.ToBackendConnectionInfo();
 
@@ -105,7 +99,7 @@ public sealed class FileStorageService(
         });
     }
 
-    public async Task<Stream> OpenDecryptedStreamAsync(EncryptedFile file, byte[] masterKey)
+    public async Task<Stream> OpenDecryptedStreamAsync(EncryptedFile file)
     {
         var dataSources = (await DataSourceDal.GetAll(
             filterExprs: [d => d.Id == file.DataSourceId],
@@ -116,6 +110,7 @@ public sealed class FileStorageService(
 
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var iv = Convert.FromBase64String(file.IvBase64);
         var connection = ds.ToBackendConnectionInfo();
         var fileStream = await storage.OpenReadAsync(connection, file.StoragePath);

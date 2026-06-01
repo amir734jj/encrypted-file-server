@@ -14,7 +14,8 @@ public record BackendRequest(
     string Password = "",
     string BasePath = "/",
     bool UseSsl = false,
-    EncryptionMethod EncryptionMethod = EncryptionMethod.AesCtr256);
+    EncryptionMethod EncryptionMethod = EncryptionMethod.AesCtr256,
+    string MasterPassword = "");
 
 public record FrontendRequest(
     FrontendType Type,

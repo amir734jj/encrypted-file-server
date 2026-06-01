@@ -1,12 +1,12 @@
 using System.Security.Claims;
 using Api.Data;
 using Api.Data.Entities;
+using Api.Extensions;
 using Api.Interfaces;
 using FubarDev.FtpServer;
 using FubarDev.FtpServer.AccountManagement;
 using FubarDev.FtpServer.BackgroundTransfer;
 using FubarDev.FtpServer.FileSystem;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
 using Shared.Models;
@@ -38,7 +38,6 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly IEncryptionProviderFactory _encryptionFactory;
-    private readonly UserManager<User> _userManager;
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
 
     public EncryptedUnixFileSystem(IServiceScope scope, Guid? userId)
@@ -48,27 +47,20 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
-        _userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
 
         Root = new VirtualDirectoryEntry("/", null, null);
     }
 
     private bool IsAnonymous => !_userId.HasValue;
 
-    private async Task<byte[]> GetMasterKeyAsync(Guid ownerId)
-    {
-        if (_masterKeyCache.TryGetValue(ownerId, out var cached))
-            return cached;
-        var user = await _userManager.FindByIdAsync(ownerId.ToString());
-        var key = Convert.FromBase64String(user!.MasterKeyBase64);
-        _masterKeyCache[ownerId] = key;
-        return key;
-    }
-
     private async Task<byte[]> GetMasterKeyForDataSourceAsync(Guid dataSourceId)
     {
+        if (_masterKeyCache.TryGetValue(dataSourceId, out var cached))
+            return cached;
         var ds = await _db.DataSources.FirstAsync(d => d.Id == dataSourceId);
-        return await GetMasterKeyAsync(ds.UserId);
+        var key = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+        _masterKeyCache[dataSourceId] = key;
+        return key;
     }
 
     private async Task<IEncryptionProvider> GetEncryptionForDataSourceAsync(Guid dataSourceId)
@@ -208,7 +200,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             throw new InvalidOperationException("Unknown file entry type.");
 
         var masterKey = await GetMasterKeyForDataSourceAsync(vfe.EncryptedFile.DataSourceId);
-        var stream = await _fileStorage.OpenDecryptedStreamAsync(vfe.EncryptedFile, masterKey);
+        var stream = await _fileStorage.OpenDecryptedStreamAsync(vfe.EncryptedFile);
 
         if (startPosition > 0)
         {

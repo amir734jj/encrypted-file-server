@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Api.Data.Entities;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
@@ -60,12 +59,12 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
                 BasePath = req.Backend.BasePath,
                 UseSsl = req.Backend.UseSsl,
                 EncryptionMethod = req.Backend.EncryptionMethod,
+                MasterPassword = req.Backend.MasterPassword,
             },
             Frontends = req.Frontends.Select(f => new FrontendConfig
             {
                 Type = f.Type,
                 AllowAnonymous = f.AllowAnonymous,
-                Password = GeneratePassword(),
             }).ToList(),
         });
 
@@ -87,6 +86,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             ds.Backend.BasePath = req.Backend.BasePath;
             ds.Backend.UseSsl = req.Backend.UseSsl;
             ds.Backend.EncryptionMethod = req.Backend.EncryptionMethod;
+            ds.Backend.MasterPassword = req.Backend.MasterPassword;
 
             // Sync frontends: add new, update existing, remove absent
             var requestedTypes = req.Frontends.Select(f => f.Type).ToHashSet();
@@ -107,7 +107,6 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
                     {
                         Type = fr.Type,
                         AllowAnonymous = fr.AllowAnonymous,
-                        Password = GeneratePassword(),
                     });
                 }
             }
@@ -140,11 +139,5 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         new(d.Id, d.Name, totalSize, fileCount, d.CreatedAt,
             new BackendDto(d.Backend.Host, d.Backend.Port, d.Backend.Username,
                 d.Backend.BasePath, d.Backend.UseSsl, d.Backend.EncryptionMethod),
-            d.Frontends.Select(f => new FrontendDto(f.Type, f.Password, f.AllowAnonymous)).ToList());
-
-    private static string GeneratePassword()
-    {
-        var bytes = RandomNumberGenerator.GetBytes(18);
-        return Convert.ToBase64String(bytes);
-    }
+            d.Frontends.Select(f => new FrontendDto(f.Type, f.AllowAnonymous)).ToList());
 }
