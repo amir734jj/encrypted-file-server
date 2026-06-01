@@ -235,6 +235,7 @@ else
 
         _uploading = false;
         await LoadAsync();
+        StateHasChanged();
         Messenger.AddInformation("Upload complete.");
     }
 
