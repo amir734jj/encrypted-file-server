@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Contracts;
+using Shared.Interfaces;
 
 namespace Api.Controllers;
 
@@ -15,6 +16,7 @@ namespace Api.Controllers;
 public sealed class FilesController(
     IEfRepository repository,
     IFileStorageService fileStorage,
+    IEncryptionProvider encryption,
     UserManager<User> users) : ControllerBase
 {
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
@@ -24,14 +26,25 @@ public sealed class FilesController(
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid dataSourceId)
     {
+        var user = await users.FindByIdAsync(CurrentUserId.ToString());
+        if (user is null) return Unauthorized();
+        var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
+
         var files = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
-            orderBy: f => f.OriginalFileName,
-            project: f => new FileEntryDto(
-                f.Id, f.DataSourceId, f.OriginalFileName,
-                f.ContentType, f.OriginalFileSize, f.CreatedAt, f.UpdatedAt))).ToList();
+            project: f => f)).ToList();
 
-        return Ok(files);
+        var dtos = files.Select(f =>
+        {
+            var iv = Convert.FromBase64String(f.IvBase64);
+            return new FileEntryDto(
+                f.Id, f.DataSourceId,
+                encryption.DecryptString(f.OriginalFileName, masterKey, iv),
+                f.ContentType is not null ? encryption.DecryptString(f.ContentType, masterKey, iv) : null,
+                f.OriginalFileSize, f.CreatedAt, f.UpdatedAt);
+        }).OrderBy(d => d.FileName).ToList();
+
+        return Ok(dtos);
     }
 
     [HttpPost("upload")]
@@ -46,9 +59,15 @@ public sealed class FilesController(
         var entity = await fileStorage.StoreFileAsync(
             CurrentUserId, dataSourceId, file.FileName, file.ContentType, stream);
 
+        var iv = Convert.FromBase64String(entity.IvBase64);
+        var user = await users.FindByIdAsync(CurrentUserId.ToString());
+        var masterKey = Convert.FromBase64String(user!.MasterKeyBase64);
+
         return Ok(new FileEntryDto(
-            entity.Id, entity.DataSourceId, entity.OriginalFileName,
-            entity.ContentType, entity.OriginalFileSize, entity.CreatedAt, entity.UpdatedAt));
+            entity.Id, entity.DataSourceId,
+            encryption.DecryptString(entity.OriginalFileName, masterKey, iv),
+            entity.ContentType is not null ? encryption.DecryptString(entity.ContentType, masterKey, iv) : null,
+            entity.OriginalFileSize, entity.CreatedAt, entity.UpdatedAt));
     }
 
     [HttpGet("{id:guid}/download")]
@@ -65,9 +84,14 @@ public sealed class FilesController(
         if (user is null) return NotFound();
 
         var masterKey = Convert.FromBase64String(user.MasterKeyBase64);
+        var iv = Convert.FromBase64String(file.IvBase64);
         var stream = await fileStorage.OpenDecryptedStreamAsync(file, masterKey);
+        var fileName = encryption.DecryptString(file.OriginalFileName, masterKey, iv);
+        var contentType = file.ContentType is not null
+            ? encryption.DecryptString(file.ContentType, masterKey, iv)
+            : "application/octet-stream";
 
-        return File(stream, file.ContentType ?? "application/octet-stream", file.OriginalFileName);
+        return File(stream, contentType, fileName);
     }
 
     [HttpDelete("{id:guid}")]

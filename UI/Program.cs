@@ -23,18 +23,15 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Logging.AddSerilog(dispose: true);
 
-// API Base URL
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"];
 if (string.IsNullOrEmpty(apiBaseUrl))
 {
     apiBaseUrl = builder.HostEnvironment.BaseAddress;
 }
 
-// Authentication
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddTransient<BearerTokenHandler>();
 
-// Refit Configuration
 var refitSettings = new RefitSettings(new NewtonsoftJsonContentSerializer());
 
 foreach (var apiType in new[]
@@ -60,14 +57,12 @@ foreach (var apiType in new[]
 builder.Services.AddScoped<ApiService>();
 builder.Services.AddBlazoredLocalStorageAsSingleton();
 
-// Havit Blazor
 builder.Services.AddHxServices();
 builder.Services.AddHxMessenger();
 builder.Services.AddHxMessageBoxHost();
 
 var host = builder.Build();
 
-// Initialize auth
 var auth = host.Services.GetRequiredService<AuthService>();
 await auth.InitAsync();
 

@@ -1,6 +1,6 @@
 using Shared.Interfaces;
 
-namespace Api.Services;
+namespace Api.Services.Frontend;
 
 /// <summary>
 /// Frontend data source that exposes files via HTTP REST endpoints (FilesController).

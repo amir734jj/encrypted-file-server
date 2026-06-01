@@ -19,7 +19,6 @@ public sealed class FileStorageService(
 
     public async Task<EncryptedFile> StoreFileAsync(Guid userId, Guid dataSourceId, string fileName, string? contentType, Stream content)
     {
-        // Verify the data source belongs to the user and get connection info
         var dataSources = (await DataSourceDal.GetAll(
             filterExprs: [d => d.Id == dataSourceId && d.UserId == userId],
             project: d => d,
@@ -55,9 +54,9 @@ public sealed class FileStorageService(
             Id = fileId,
             UserId = userId,
             DataSourceId = dataSourceId,
-            OriginalFileName = Path.GetFileName(fileName),
+            OriginalFileName = encryption.EncryptString(Path.GetFileName(fileName), masterKey, iv),
             StoragePath = storagePath,
-            ContentType = contentType,
+            ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
             OriginalFileSize = originalSize,
             IvBase64 = Convert.ToBase64String(iv),
             CreatedAt = DateTimeOffset.UtcNow

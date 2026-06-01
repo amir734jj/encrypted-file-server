@@ -8,9 +8,9 @@ public sealed class EncryptedFileMapping : IEntityTypeConfiguration<EncryptedFil
 {
     public void Configure(EntityTypeBuilder<EncryptedFile> builder)
     {
-        builder.Property(f => f.OriginalFileName).HasMaxLength(500).IsRequired();
+        builder.Property(f => f.OriginalFileName).HasMaxLength(2000).IsRequired();
         builder.Property(f => f.StoragePath).HasMaxLength(1000).IsRequired();
-        builder.Property(f => f.ContentType).HasMaxLength(200);
+        builder.Property(f => f.ContentType).HasMaxLength(500);
         builder.Property(f => f.IvBase64).HasMaxLength(50).IsRequired();
 
         builder.HasOne(f => f.User)
@@ -23,6 +23,6 @@ public sealed class EncryptedFileMapping : IEntityTypeConfiguration<EncryptedFil
                .HasForeignKey(f => f.DataSourceId)
                .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasIndex(f => new { f.DataSourceId, f.OriginalFileName });
+        builder.HasIndex(f => f.DataSourceId);
     }
 }

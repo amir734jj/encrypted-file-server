@@ -50,6 +50,21 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         Root = new VirtualDirectoryEntry("/", null);
     }
 
+    private byte[]? _masterKey;
+    private async Task<byte[]> GetMasterKeyAsync()
+    {
+        if (_masterKey is not null) return _masterKey;
+        var user = await _userManager.FindByIdAsync(_userId.ToString());
+        _masterKey = Convert.FromBase64String(user!.MasterKeyBase64);
+        return _masterKey;
+    }
+
+    private string DecryptFileName(EncryptedFile f, byte[] masterKey)
+    {
+        var iv = Convert.FromBase64String(f.IvBase64);
+        return _encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+    }
+
     public bool SupportsNonEmptyDirectoryDelete => true;
     public bool SupportsAppend => false;
     public StringComparer FileSystemEntryComparer => StringComparer.OrdinalIgnoreCase;
@@ -73,14 +88,15 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 
         if (directoryEntry is VirtualDirectoryEntry { DataSourceId: { } dsId })
         {
-            // Data source directory: list files
+            // Data source directory: list files (decrypt names in memory)
             var files = await _db.EncryptedFiles
                 .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
-                .OrderBy(f => f.OriginalFileName)
                 .ToListAsync(ct);
 
+            var masterKey = await GetMasterKeyAsync();
             return files
-                .Select(f => (IUnixFileSystemEntry)new VirtualFileEntry(f))
+                .Select(f => (IUnixFileSystemEntry)new VirtualFileEntry(f, DecryptFileName(f, masterKey)))
+                .OrderBy(e => e.Name)
                 .ToList();
         }
 
@@ -99,10 +115,14 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 
         if (directoryEntry is VirtualDirectoryEntry { DataSourceId: { } dsId })
         {
-            var file = await _db.EncryptedFiles
-                .FirstOrDefaultAsync(f => f.DataSourceId == dsId && f.UserId == _userId
-                    && f.OriginalFileName == name, ct);
-            return file is null ? null : new VirtualFileEntry(file);
+            // File names are encrypted — load all, decrypt, then match
+            var files = await _db.EncryptedFiles
+                .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
+                .ToListAsync(ct);
+
+            var masterKey = await GetMasterKeyAsync();
+            var match = files.FirstOrDefault(f => DecryptFileName(f, masterKey) == name);
+            return match is null ? null : new VirtualFileEntry(match, name);
         }
 
         return null;
@@ -116,6 +136,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         var user = await _userManager.FindByIdAsync(_userId.ToString());
         var masterKey = Convert.FromBase64String(user!.MasterKeyBase64);
         var stream = await _fileStorage.OpenDecryptedStreamAsync(vfe.EncryptedFile, masterKey);
+        _masterKey = masterKey;
 
         if (startPosition > 0)
         {
@@ -140,7 +161,6 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         if (targetDirectory is not VirtualDirectoryEntry { DataSourceId: { } dsId })
             throw new InvalidOperationException("Cannot create files in the root directory. Use a data source folder.");
 
-        // Verify the data source belongs to this user
         var dsOwned = await _db.DataSources.AnyAsync(d => d.Id == dsId && d.UserId == _userId, ct);
         if (!dsOwned)
             throw new UnauthorizedAccessException("Data source does not belong to the current user.");
@@ -154,13 +174,11 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         if (fileEntry is not VirtualFileEntry vfe)
             throw new InvalidOperationException("Unknown file entry type.");
 
-        // Verify ownership before replacing
         if (vfe.EncryptedFile.UserId != _userId)
             throw new UnauthorizedAccessException("File does not belong to the current user.");
 
-        // Delete old, create new
         var dsId = vfe.EncryptedFile.DataSourceId;
-        var fileName = vfe.EncryptedFile.OriginalFileName;
+        var fileName = vfe.DecryptedName;
         await _fileStorage.DeleteFileAsync(vfe.EncryptedFile);
         await _fileStorage.StoreFileAsync(_userId, dsId, fileName, null, data);
         return null;
@@ -170,7 +188,6 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     {
         if (entry is VirtualFileEntry vfe)
         {
-            // Verify ownership before deleting
             if (vfe.EncryptedFile.UserId != _userId)
                 throw new UnauthorizedAccessException("File does not belong to the current user.");
 
@@ -178,7 +195,6 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         }
         else if (entry is VirtualDirectoryEntry { DataSourceId: { } dsId })
         {
-            // Verify the data source belongs to this user
             var ds = await _db.DataSources.FirstOrDefaultAsync(
                 d => d.Id == dsId && d.UserId == _userId, ct);
             if (ds is null) return;
@@ -197,7 +213,6 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     public Task<IUnixDirectoryEntry> CreateDirectoryAsync(
         IUnixDirectoryEntry targetDirectory, string directoryName, CancellationToken ct)
     {
-        // Data sources require backend FTP configuration and must be created via the web UI
         throw new NotSupportedException("Data sources cannot be created via FTP. Use the web interface to configure backend storage.");
     }
 
@@ -215,7 +230,6 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     public Task<IUnixFileSystemEntry> SetMacTimeAsync(IUnixFileSystemEntry entry,
         DateTimeOffset? modify, DateTimeOffset? access, DateTimeOffset? create, CancellationToken ct)
     {
-        // No-op, return entry as-is
         return Task.FromResult(entry);
     }
 
@@ -245,10 +259,11 @@ public sealed class VirtualDirectoryEntry(string name, Guid? dataSourceId) : IUn
 /// <summary>
 /// Virtual file entry backed by an encrypted file.
 /// </summary>
-public sealed class VirtualFileEntry(EncryptedFile encryptedFile) : IUnixFileEntry
+public sealed class VirtualFileEntry(EncryptedFile encryptedFile, string decryptedName) : IUnixFileEntry
 {
     public EncryptedFile EncryptedFile => encryptedFile;
-    public string Name => encryptedFile.OriginalFileName;
+    public string DecryptedName => decryptedName;
+    public string Name => decryptedName;
     public IUnixPermissions Permissions => new VirtualPermissions();
     public DateTimeOffset? LastWriteTime => encryptedFile.UpdatedAt ?? encryptedFile.CreatedAt;
     public DateTimeOffset? CreatedTime => encryptedFile.CreatedAt;

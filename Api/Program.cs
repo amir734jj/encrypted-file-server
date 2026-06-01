@@ -8,6 +8,8 @@ using Api.Extensions;
 using Api.Ftp;
 using Api.Middleware;
 using Api.Services;
+using Api.Services.Backend;
+using Api.Services.Frontend;
 using Api.Utilities;
 using FubarDev.FtpServer;
 using FubarDev.FtpServer.AccountManagement;
@@ -25,7 +27,6 @@ using Shared.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Serilog ──
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
@@ -42,7 +43,6 @@ Log.Logger = new LoggerConfiguration()
     .CreateLogger();
 builder.Host.UseSerilog();
 
-// ── Kestrel ──
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     var portConfig = builder.Configuration.GetValue<string>("PORT");
@@ -50,7 +50,6 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
     serverOptions.ListenAnyIP(port);
 });
 
-// ── Database ──
 var connectionString = ConnectionStringUtility.ConnectionStringUrlToPgResource(
     builder.Configuration.GetValue<string>("DATABASE_URL")
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
@@ -58,13 +57,11 @@ var connectionString = ConnectionStringUtility.ConnectionStringUrlToPgResource(
 
 builder.Services.AddDbContext<AppDbContext>(opt => opt.UseNpgsql(connectionString));
 
-// ── EF Repository ──
 builder.Services.AddEfRepository<AppDbContext>(x =>
 {
     x.Profile(Assembly.GetAssembly(typeof(AppDbContext)));
 });
 
-// ── Identity ──
 builder.Services
     .AddIdentity<User, Role>(opt =>
     {
@@ -74,7 +71,6 @@ builder.Services
     .AddEntityFrameworkStores<AppDbContext>()
     .AddDefaultTokenProviders();
 
-// ── JWT Authentication ──
 builder.Services
     .AddAuthentication(opt =>
     {
@@ -99,7 +95,6 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-// ── Rate Limiting ──
 builder.Services.AddRateLimiter(opt =>
 {
     opt.AddFixedWindowLimiter("login", w =>
@@ -115,10 +110,8 @@ builder.Services.AddRateLimiter(opt =>
 builder.Services.AddMemoryCache();
 builder.Services.AddHealthChecks();
 
-// ── Controllers & JSON ──
 builder.Services.AddControllers().AddNewtonsoftJson();
 
-// ── Auto-register services with Scrutor ──
 builder.Services.Scan(scan => scan
     .FromAssemblies(Assembly.Load("Api"))
     .AddClasses()
@@ -126,13 +119,11 @@ builder.Services.Scan(scan => scan
     .AsMatchingInterface()
     .WithScopedLifetime());
 
-// ── Pluggable providers (swap implementations here) ──
-builder.Services.AddSingleton<IEncryptionProvider, AesCbcEncryptionProvider>();
+builder.Services.AddSingleton<IEncryptionProvider, AesCtrEncryptionProvider>();
 builder.Services.AddSingleton<IBackendStorageProvider, FtpBackendStorageProvider>();
 builder.Services.AddSingleton<IFrontendDataSource, HttpFrontendDataSource>();
 builder.Services.AddSingleton<IFrontendDataSource, FtpFrontendDataSource>();
 
-// ── FTP Server ──
 builder.Services.AddFtpServer(opt => { });
 builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
 {
@@ -142,7 +133,6 @@ builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
 builder.Services.AddSingleton<IFileSystemClassFactory, EncryptedFileSystemProvider>();
 builder.Services.AddSingleton<IMembershipProvider, EncryptedMembershipProvider>();
 
-// ── Swagger ──
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(opt =>
 {
@@ -161,7 +151,6 @@ builder.Services.AddSwaggerGen(opt =>
     });
 });
 
-// ── CORS ──
 builder.Services.AddCors(opt =>
     opt.AddDefaultPolicy(p => p
         .WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:5001"])
@@ -171,20 +160,17 @@ builder.Services.AddCors(opt =>
 
 var app = builder.Build();
 
-// ── Auto-migrate database ──
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.MigrateAsync();
 }
 
-// ── Initialize global config change handlers ──
 using (var configScope = app.Services.CreateScope())
 {
     await configScope.ServiceProvider.GetRequiredService<Api.Interfaces.IGlobalConfigService>().InitAsync();
 }
 
-// ── Start all frontend data sources ──
 var frontends = app.Services.GetServices<IFrontendDataSource>();
 foreach (var frontend in frontends)
 {
@@ -192,7 +178,6 @@ foreach (var frontend in frontends)
     Log.Information("Frontend data source started: {Source}", frontend.DisplayName);
 }
 
-// ── Middleware Pipeline ──
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -227,7 +212,6 @@ app.UseSerilogRequestLogging(opts =>
 app.MapControllers();
 app.MapHealthChecks("/api/health").AllowAnonymous();
 
-// ── Fallbacks ──
 app.MapFallback("api/{**rest}", async context =>
 {
     context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
@@ -242,7 +226,6 @@ else
 
 await app.RunAsync();
 
-// ── Cleanup all frontend data sources ──
 foreach (var frontend in app.Services.GetServices<IFrontendDataSource>())
 {
     await frontend.StopAsync(CancellationToken.None);

@@ -21,4 +21,10 @@ public interface IEncryptionProvider
     /// The returned stream reads plaintext; disposing it also disposes the source.
     /// </summary>
     Stream CreateDecryptingStream(Stream source, byte[] masterKey, byte[] iv);
+
+    /// <summary>Encrypts a plaintext string. Returns base64-encoded ciphertext.</summary>
+    string EncryptString(string plaintext, byte[] masterKey, byte[] iv);
+
+    /// <summary>Decrypts a base64-encoded ciphertext string back to plaintext.</summary>
+    string DecryptString(string ciphertext, byte[] masterKey, byte[] iv);
 }

@@ -13,8 +13,6 @@ public sealed class ApiService(
     IGlobalConfigApi globalConfigApi,
     AuthService auth)
 {
-    // ── Auth ──
-
     public async Task<string?> LoginAsync(string email, string password)
     {
         try
@@ -55,26 +53,18 @@ public sealed class ApiService(
 
     public async Task<MeResponse> GetProfileAsync() => await authApi.MeAsync();
 
-    // ── Users ──
-
     public Task<List<UserDto>> GetUsersAsync() => usersApi.GetAllAsync();
     public Task ActivateUserAsync(Guid id) => usersApi.ActivateAsync(id);
     public Task DeactivateUserAsync(Guid id) => usersApi.DeactivateAsync(id);
     public Task DeleteUserAsync(Guid id) => usersApi.DeleteAsync(id);
 
-    // ── Profile ──
-
     public Task UpdateProfileAsync(UpdateProfileRequest req) => profileApi.UpdateAsync(req);
     public Task ChangePasswordAsync(ChangePasswordRequest req) => profileApi.ChangePasswordAsync(req);
-
-    // ── Data Sources ──
 
     public Task<List<DataSourceDto>> GetDataSourcesAsync() => dataSourcesApi.GetAllAsync();
     public Task<DataSourceDto> CreateDataSourceAsync(CreateDataSourceRequest req) => dataSourcesApi.CreateAsync(req);
     public Task UpdateDataSourceAsync(Guid id, UpdateDataSourceRequest req) => dataSourcesApi.UpdateAsync(id, req);
     public Task DeleteDataSourceAsync(Guid id) => dataSourcesApi.DeleteAsync(id);
-
-    // ── Files ──
 
     public Task<List<FileEntryDto>> GetFilesAsync(Guid dataSourceId) => filesApi.GetAllAsync(dataSourceId);
 
@@ -85,8 +75,6 @@ public sealed class ApiService(
     }
 
     public Task DeleteFileAsync(Guid id) => filesApi.DeleteAsync(id);
-
-    // ── Global Config ──
 
     public Task<GlobalConfigModel> GetGlobalConfigAsync() => globalConfigApi.GetAsync();
     public Task SaveGlobalConfigAsync(GlobalConfigModel config) => globalConfigApi.SaveAsync(config);

@@ -1,7 +1,7 @@
 using FluentFTP;
 using Shared.Interfaces;
 
-namespace Api.Services;
+namespace Api.Services.Backend;
 
 /// <summary>
 /// Stores encrypted file blobs on a remote FTP server via FluentFTP.

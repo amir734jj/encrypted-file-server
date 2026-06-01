@@ -1,30 +1,35 @@
+using Api.Extensions;
+using Npgsql;
+
 namespace Api.Utilities;
 
 public static class ConnectionStringUtility
 {
-    /// <summary>
-    /// Converts a DATABASE_URL (e.g. postgres://user:pass@host:port/db) to a Npgsql connection string.
-    /// If already a standard connection string, returns as-is.
-    /// </summary>
-    public static string ConnectionStringUrlToPgResource(string connectionString)
+    public static string ConnectionStringUrlToPgResource(string connectionStringUrl, Action<NpgsqlConnectionStringBuilder>? action = null)
     {
-        if (string.IsNullOrWhiteSpace(connectionString))
-            throw new ArgumentException("Connection string is required.", nameof(connectionString));
+        var table = UrlUtility.UrlToResource(connectionStringUrl);
+        if (!table.ContainKeys("Host", "Username", "Password", "Database", "ApplicationName"))
+            return connectionStringUrl; // Not a URL, return as-is (standard connection string)
 
-        if (!connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
-            !connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        if (!int.TryParse(table["Port"], out var port) || port <= 0)
+            port = 5432;
+
+        var connectionStringBuilder = new NpgsqlConnectionStringBuilder
         {
-            return connectionString;
-        }
+            Host = table["Host"],
+            Username = table["Username"],
+            Password = table["Password"],
+            Database = table["Database"],
+            ApplicationName = table["ApplicationName"],
+            SslMode = SslMode.Prefer,
+            Pooling = true,
+            MaxPoolSize = 20,
+            Port = port,
+            CommandTimeout = 0,
+            Timeout = (int)TimeSpan.FromMinutes(1).TotalSeconds
+        };
 
-        var uri = new Uri(connectionString);
-        var userInfo = uri.UserInfo.Split(':');
-        var user = Uri.UnescapeDataString(userInfo[0]);
-        var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty;
-        var host = uri.Host;
-        var port = uri.Port > 0 ? uri.Port : 5432;
-        var database = uri.AbsolutePath.TrimStart('/');
-
-        return $"Host={host};Port={port};Database={database};Username={user};Password={password};SSL Mode=Prefer;Trust Server Certificate=true;";
+        (action ?? (_ => { }))(connectionStringBuilder);
+        return connectionStringBuilder.ToString();
     }
 }
