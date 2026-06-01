@@ -214,10 +214,15 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 }
             }
 
-            // Allow navigating into any path — empty folders are valid for uploading files into
-            var emptyPath = currentPath + name + "/";
-            _sessionDirs.Add((dsId, emptyPath));
-            return new VirtualDirectoryEntry(name, dsId, emptyPath);
+            // Check session-tracked dirs (from explicit MKD)
+            var candidatePath = currentPath + name + "/";
+            if (_sessionDirs.Contains((dsId, candidatePath)))
+            {
+                return new VirtualDirectoryEntry(name, dsId, candidatePath);
+            }
+
+            // Allow CWD into any path for uploading, but don't track it as a session dir
+            return new VirtualDirectoryEntry(name, dsId, candidatePath);
         }
 
         return null;
