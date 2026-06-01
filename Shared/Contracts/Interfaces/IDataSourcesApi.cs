@@ -23,4 +23,7 @@ public interface IDataSourcesApi
 
     [Post("/api/datasources/{id}/reencrypt")]
     Task<BulkOperationResult> ReEncryptAllAsync(Guid id, [Query] EncryptionMethod method);
+
+    [Get("/api/datasources/{id}/progress")]
+    Task<BulkOperationProgress?> GetProgressAsync(Guid id);
 }

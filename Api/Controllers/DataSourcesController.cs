@@ -18,10 +18,18 @@ public sealed class DataSourcesController(
     IEfRepository repository,
     IFileStorageService fileStorage) : ControllerBase
 {
-    private static readonly ConcurrentDictionary<Guid, byte> RunningOps = new();
+    private static readonly ConcurrentDictionary<Guid, BulkOperationProgress> RunningOps = new();
 
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private Guid CurrentUserId => User.GetUserId();
+
+    [HttpGet("{id:guid}/progress")]
+    public IActionResult GetProgress(Guid id)
+    {
+        return RunningOps.TryGetValue(id, out var progress)
+            ? Ok(progress)
+            : NoContent();
+    }
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
@@ -83,7 +91,7 @@ public sealed class DataSourcesController(
             return NotFound();
         }
 
-        if (!RunningOps.TryAdd(id, 0))
+        if (!RunningOps.TryAdd(id, new BulkOperationProgress("Decrypt", 0, 0)))
         {
             return Conflict("A bulk operation is already running for this data source.");
         }
@@ -94,6 +102,8 @@ public sealed class DataSourcesController(
                 filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
                 project: f => f)).ToList();
 
+            RunningOps[id] = new BulkOperationProgress("Decrypt", files.Count, 0);
+
             var processed = 0;
             foreach (var file in files)
             {
@@ -101,6 +111,7 @@ public sealed class DataSourcesController(
                 {
                     await fileStorage.DecryptFileAsync(file);
                     processed++;
+                    RunningOps[id] = new BulkOperationProgress("Decrypt", files.Count, processed);
                 }
                 catch { /* skip files that fail */ }
             }
@@ -121,7 +132,7 @@ public sealed class DataSourcesController(
             return NotFound();
         }
 
-        if (!RunningOps.TryAdd(id, 0))
+        if (!RunningOps.TryAdd(id, new BulkOperationProgress("Re-encrypt", 0, 0)))
         {
             return Conflict("A bulk operation is already running for this data source.");
         }
@@ -132,6 +143,8 @@ public sealed class DataSourcesController(
                 filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
                 project: f => f)).ToList();
 
+            RunningOps[id] = new BulkOperationProgress("Re-encrypt", files.Count, 0);
+
             var processed = 0;
             foreach (var file in files)
             {
@@ -139,6 +152,7 @@ public sealed class DataSourcesController(
                 {
                     await fileStorage.ReEncryptFileAsync(file, method);
                     processed++;
+                    RunningOps[id] = new BulkOperationProgress("Re-encrypt", files.Count, processed);
                 }
                 catch { /* skip files that fail */ }
             }
