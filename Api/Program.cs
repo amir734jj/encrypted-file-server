@@ -193,8 +193,7 @@ foreach (var frontend in frontends)
     Log.Information("Frontend data source started: {Source}", frontend.DisplayName);
 }
 
-app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
+app.MapStaticAssets();
 
 if (app.Environment.IsDevelopment())
 {
