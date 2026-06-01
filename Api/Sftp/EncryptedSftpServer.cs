@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Api.Data.Entities;
 using EfCoreRepository.Interfaces;
 using FxSsh;
@@ -17,6 +18,7 @@ public sealed class EncryptedSftpServer : IDisposable
     private readonly SshServer _server;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<EncryptedSftpServer> _logger;
+    private readonly ConcurrentDictionary<Guid, SftpSubsystem> _activeSubsystems = new();
 
     public EncryptedSftpServer(IServiceScopeFactory scopeFactory, IConfiguration config, ILogger<EncryptedSftpServer> logger)
     {
@@ -81,7 +83,10 @@ public sealed class EncryptedSftpServer : IDisposable
                     {
                         _logger.LogDebug("SFTP subsystem requested");
                         var scope = _scopeFactory.CreateScope();
-                        var subsystem = new SftpSubsystem(e.Channel, scope, authenticatedUserId, _logger);
+                        var subsystemId = Guid.NewGuid();
+                        var subsystem = new SftpSubsystem(e.Channel, scope, authenticatedUserId, _logger,
+                            () => { _activeSubsystems.TryRemove(subsystemId, out SftpSubsystem? _); });
+                        _activeSubsystems[subsystemId] = subsystem;
                         subsystem.Start();
                     }
                 };

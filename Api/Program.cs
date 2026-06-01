@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.RateLimiting;
 using Api.Data;
@@ -147,6 +149,10 @@ builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opt =>
     opt.ServerAddress = "0.0.0.0";
     opt.Port = builder.Configuration.GetValue("Ftp:Port", 2121);
 });
+builder.Services.Configure<FubarDev.FtpServer.AuthTlsOptions>(opt =>
+{
+    opt.ServerCertificate = LoadOrGenerateFtpCertificate();
+});
 builder.Services.AddSingleton<IPasvAddressResolver>(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
@@ -276,4 +282,21 @@ await app.RunAsync();
 foreach (var frontend in app.Services.GetServices<IFrontendDataSource>())
 {
     await frontend.StopAsync(CancellationToken.None);
+}
+
+static X509Certificate2 LoadOrGenerateFtpCertificate()
+{
+    var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+    Directory.CreateDirectory(dataDir);
+    var pfxPath = Path.Combine(dataDir, "ftp_tls.pfx");
+
+    if (File.Exists(pfxPath))
+        return X509CertificateLoader.LoadPkcs12FromFile(pfxPath, null);
+
+    using var rsa = RSA.Create(2048);
+    var req = new CertificateRequest("CN=EncryptedFileServer", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+    req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
+    var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(10));
+    File.WriteAllBytes(pfxPath, cert.Export(X509ContentType.Pfx));
+    return X509CertificateLoader.LoadPkcs12FromFile(pfxPath, null);
 }

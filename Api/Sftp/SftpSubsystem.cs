@@ -76,6 +76,7 @@ public sealed class SftpSubsystem : IDisposable
     private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
+    private readonly Action? _onDisposed;
     private List<DataSource>? _cachedDataSources;
     private int _handleCounter;
     private int _bufferLen;
@@ -83,12 +84,13 @@ public sealed class SftpSubsystem : IDisposable
     private Task? _processTask;
     private bool _disposed;
 
-    public SftpSubsystem(SessionChannel channel, IServiceScope scope, Guid? userId, ILogger logger)
+    public SftpSubsystem(SessionChannel channel, IServiceScope scope, Guid? userId, ILogger logger, Action? onDisposed = null)
     {
         _channel = channel;
         _scope = scope;
         _userId = userId;
         _logger = logger;
+        _onDisposed = onDisposed;
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
@@ -853,6 +855,7 @@ public sealed class SftpSubsystem : IDisposable
 
         _scope.Dispose();
         _cts.Dispose();
+        _onDisposed?.Invoke();
     }
 
     #endregion
