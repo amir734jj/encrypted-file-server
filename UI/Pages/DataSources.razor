@@ -78,7 +78,8 @@ else
                             <i class="bi bi-pencil me-1"></i> Edit
                         </HxButton>
                         <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true"
-                                  OnClick="() => DecryptDataSource(ds)" title="Decrypt all files">
+                                  OnClick="() => DecryptDataSource(ds)" title="Decrypt all files"
+                                  Enabled="@(ds.Backend.EncryptionMethod != EncryptionMethod.None)">
                             <i class="bi bi-unlock me-1"></i> Decrypt All
                         </HxButton>
                         <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" Outline="true"
