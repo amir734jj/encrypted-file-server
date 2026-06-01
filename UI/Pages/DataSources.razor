@@ -96,7 +96,7 @@ else
                         </HxButton>
                         @if (ds.Backend.EncryptionMethod != EncryptionMethod.None)
                         {
-                            <HxButton Color="ThemeColor.Light" Size="ButtonSize.Small" Outline="true"
+                            <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" Outline="true"
                                       OnClick="() => RevealMasterPassword(ds.Id)"
                                       Enabled="@(!_revealedPasswords.ContainsKey(ds.Id))">
                                 <i class="bi bi-eye me-1"></i> Show Password
