@@ -13,10 +13,4 @@ public class GlobalConfigModel
 
     [GlobalConfigCol(Name = "MAX_UPLOAD_SIZE_MB")]
     public int MaxUploadSizeMb { get; set; } = 500;
-
-    [GlobalConfigCol(Name = "STORAGE_BASE_PATH")]
-    public string StorageBasePath { get; set; } = "storage";
-
-    [GlobalConfigCol(Name = "ENCRYPTION_ALGORITHM")]
-    public string EncryptionAlgorithm { get; set; } = "aes-cbc-256";
 }
