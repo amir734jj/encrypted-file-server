@@ -9,6 +9,7 @@ public sealed class DataSourceMapping : IEntityTypeConfiguration<DataSource>
     public void Configure(EntityTypeBuilder<DataSource> builder)
     {
         builder.Property(d => d.Name).HasMaxLength(200).IsRequired();
+        builder.Property(d => d.EncryptionMethod).HasMaxLength(50).HasDefaultValue("aes-ctr-256");
         builder.HasIndex(d => new { d.UserId, d.Name }).IsUnique();
         builder.HasOne(d => d.User)
                .WithMany()

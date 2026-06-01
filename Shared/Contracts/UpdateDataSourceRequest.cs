@@ -2,7 +2,8 @@ namespace Shared.Contracts;
 
 public record UpdateDataSourceRequest(
     string Name,
-    string BackendFtpHost,
+    string EncryptionMethod = "aes-ctr-256",
+    string BackendFtpHost = "",
     int BackendFtpPort = 21,
     string BackendFtpUsername = "",
     string BackendFtpPassword = "",

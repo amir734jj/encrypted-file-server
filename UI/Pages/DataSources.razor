@@ -54,6 +54,7 @@ else
                         {
                             <span class="badge bg-success me-1 mt-1">HTTP @(ds.FrontendHttpAllowAnonymous ? "(anon)" : "")</span>
                         }
+                        <span class="badge bg-secondary me-1 mt-1">@ds.EncryptionMethod</span>
                         <br />
                         <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
                     </div>
@@ -80,6 +81,14 @@ else
         <h6 class="text-muted mb-2">General</h6>
         <div class="mb-3">
             <HxInputText Label="Name" @bind-Value="_name" Placeholder="My Documents" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Encryption Method</label>
+            <select class="form-select" @bind="_encryptionMethod">
+                <option value="aes-ctr-256">AES-256-CTR (streaming)</option>
+                <option value="aes-gcm-256">AES-256-GCM (AEAD, chunked)</option>
+                <option value="chacha20-poly1305">ChaCha20-Poly1305 (AEAD, chunked)</option>
+            </select>
         </div>
 
         <h6 class="text-muted mb-2 mt-4">Backend FTP Server</h6>
@@ -152,6 +161,7 @@ else
     private bool _ftpAnon;
     private bool _httpEnabled;
     private bool _httpAnon;
+    private string _encryptionMethod = "aes-ctr-256";
     private string? _editFtpPassword;
     private string? _editHttpPassword;
 
@@ -188,6 +198,7 @@ else
         _ftpAnon = false;
         _httpEnabled = false;
         _httpAnon = false;
+        _encryptionMethod = "aes-ctr-256";
         _editFtpPassword = null;
         _editHttpPassword = null;
         _showModal = true;
@@ -207,6 +218,7 @@ else
         _ftpAnon = ds.FrontendFtpAllowAnonymous;
         _httpEnabled = ds.FrontendHttpEnabled;
         _httpAnon = ds.FrontendHttpAllowAnonymous;
+        _encryptionMethod = ds.EncryptionMethod;
         _editFtpPassword = ds.FrontendFtpPassword;
         _editHttpPassword = ds.FrontendHttpPassword;
         _showModal = true;
@@ -222,7 +234,7 @@ else
             if (_editId.HasValue)
             {
                 var req = new UpdateDataSourceRequest(
-                    _name.Trim(), _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
+                    _name.Trim(), _encryptionMethod, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
                     _ftpEnabled, _ftpAnon, _httpEnabled, _httpAnon);
                 await Api.UpdateDataSourceAsync(_editId.Value, req);
                 Messenger.AddInformation("Data source updated.");
@@ -230,7 +242,7 @@ else
             else
             {
                 var req = new CreateDataSourceRequest(
-                    _name.Trim(), _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
+                    _name.Trim(), _encryptionMethod, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl,
                     _ftpEnabled, _ftpAnon, _httpEnabled, _httpAnon);
                 await Api.CreateDataSourceAsync(req);
                 Messenger.AddInformation("Data source created.");

@@ -1,4 +1,5 @@
 @page "/files/{DataSourceId:guid}"
+@page "/files/{DataSourceId:guid}/{**Path}"
 @inject ApiService Api
 @inject AuthService Auth
 @inject NavigationManager Nav
@@ -15,15 +16,40 @@
 <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
         <li class="breadcrumb-item"><a href="/datasources">Data Sources</a></li>
-        <li class="breadcrumb-item active">Files</li>
+        @{
+            var segments = GetPathSegments();
+        }
+        @if (segments.Count == 0)
+        {
+            <li class="breadcrumb-item active">Files</li>
+        }
+        else
+        {
+            <li class="breadcrumb-item"><a href="/files/@DataSourceId">Root</a></li>
+            @for (var i = 0; i < segments.Count; i++)
+            {
+                var breadcrumbPath = string.Join("/", segments.Take(i + 1));
+                if (i == segments.Count - 1)
+                {
+                    <li class="breadcrumb-item active">@segments[i]</li>
+                }
+                else
+                {
+                    <li class="breadcrumb-item"><a href="/files/@DataSourceId/@breadcrumbPath">@segments[i]</a></li>
+                }
+            }
+        }
     </ol>
 </nav>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h3><i class="bi bi-file-earmark-lock me-2"></i>Files</h3>
-    <div>
+    <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : "Files")</h3>
+    <div class="d-flex gap-2">
+        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="ShowNewFolderPrompt">
+            <i class="bi bi-folder-plus me-1"></i> New Folder
+        </HxButton>
         <InputFile OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
-        <label for="fileUpload" class="btn btn-primary">
+        <label for="fileUpload" class="btn btn-primary btn-sm">
             <i class="bi bi-upload me-1"></i> Upload Files
         </label>
     </div>
@@ -37,17 +63,17 @@
     </div>
 }
 
-@if (_files is null)
+@if (_listing is null)
 {
     <div class="d-flex align-items-center">
         <div class="spinner-border spinner-border-sm me-2"></div>
         Loading...
     </div>
 }
-else if (_files.Count == 0)
+else if (_listing.Folders.Count == 0 && _listing.Files.Count == 0)
 {
     <div class="alert alert-info">
-        <i class="bi bi-info-circle me-2"></i>No files yet. Upload files via the button above or use an FTP client.
+        <i class="bi bi-info-circle me-2"></i>Empty folder. Upload files or create a subfolder.
     </div>
 }
 else
@@ -59,12 +85,41 @@ else
                     <th>Name</th>
                     <th>Size</th>
                     <th>Type</th>
-                    <th>Uploaded</th>
+                    <th>Modified</th>
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var file in _files)
+                @if (segments.Count > 0)
+                {
+                    var parentPath = segments.Count > 1
+                        ? string.Join("/", segments.Take(segments.Count - 1))
+                        : "";
+                    <tr class="cursor-pointer" @onclick="() => NavigateTo(parentPath)">
+                        <td><i class="bi bi-arrow-up me-1 text-muted"></i> ..</td>
+                        <td></td><td></td><td></td><td></td>
+                    </tr>
+                }
+                @foreach (var folder in _listing.Folders)
+                {
+                    var folderPath = string.IsNullOrEmpty(Path) ? folder.Name : $"{Path}/{folder.Name}";
+                    <tr class="cursor-pointer" @onclick="() => NavigateTo(folderPath)">
+                        <td>
+                            <i class="bi bi-folder-fill text-warning me-1"></i>
+                            @folder.Name
+                        </td>
+                        <td>@FormatBytes(folder.TotalSize)</td>
+                        <td><span class="badge bg-secondary">folder</span></td>
+                        <td></td>
+                        <td class="text-end">
+                            <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true"
+                                      OnClick="() => DeleteFolder(folder)" OnClickStopPropagation="true">
+                                <i class="bi bi-trash"></i>
+                            </HxButton>
+                        </td>
+                    </tr>
+                }
+                @foreach (var file in _listing.Files)
                 {
                     <tr>
                         <td>
@@ -87,31 +142,76 @@ else
             </tbody>
         </table>
     </div>
+    <small class="text-muted">
+        @_listing.Folders.Count folder(s), @_listing.Files.Count file(s)
+    </small>
 }
+
+<HxModal @bind-IsOpen="_showNewFolder" Title="New Folder">
+    <BodyTemplate>
+        <HxInputText Label="Folder Name" @bind-Value="_newFolderName" Placeholder="documents" />
+    </BodyTemplate>
+    <FooterTemplate>
+        <HxButton Color="ThemeColor.Secondary" OnClick="() => _showNewFolder = false">Cancel</HxButton>
+        <HxButton Color="ThemeColor.Primary" OnClick="CreateFolder"
+                  Enabled="@(!string.IsNullOrWhiteSpace(_newFolderName))">Create</HxButton>
+    </FooterTemplate>
+</HxModal>
 
 @code {
     [Parameter] public Guid DataSourceId { get; set; }
+    [Parameter] public string? Path { get; set; }
 
-    private List<FileEntryDto>? _files;
+    private DirectoryListingDto? _listing;
     private bool _uploading;
+    private bool _showNewFolder;
+    private string _newFolderName = string.Empty;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
         if (!Auth.IsAuthenticated) return;
         await LoadAsync();
     }
 
+    private List<string> GetPathSegments() =>
+        string.IsNullOrEmpty(Path)
+            ? []
+            : Path.Split('/', StringSplitOptions.RemoveEmptyEntries).ToList();
+
     private async Task LoadAsync()
     {
         try
         {
-            _files = await Api.GetFilesAsync(DataSourceId);
+            _listing = await Api.GetFilesAsync(DataSourceId, Path ?? "");
         }
         catch (Exception ex)
         {
-            Messenger.AddError($"Failed to load files: {ex.Message}");
-            _files = [];
+            Messenger.AddError($"Failed to load: {ex.Message}");
+            _listing = new DirectoryListingDto("", [], []);
         }
+    }
+
+    private void NavigateTo(string folderPath)
+    {
+        var url = string.IsNullOrEmpty(folderPath)
+            ? $"/files/{DataSourceId}"
+            : $"/files/{DataSourceId}/{folderPath}";
+        Nav.NavigateTo(url);
+    }
+
+    private void ShowNewFolderPrompt()
+    {
+        _newFolderName = string.Empty;
+        _showNewFolder = true;
+    }
+
+    private void CreateFolder()
+    {
+        _showNewFolder = false;
+        var folderPath = string.IsNullOrEmpty(Path)
+            ? _newFolderName.Trim()
+            : $"{Path}/{_newFolderName.Trim()}";
+        NavigateTo(folderPath);
     }
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
@@ -123,8 +223,9 @@ else
         {
             try
             {
-                await using var stream = file.OpenReadStream(maxAllowedSize: 500_000_000); // 500 MB
-                await Api.UploadFileAsync(DataSourceId, stream, file.Name, file.ContentType ?? "application/octet-stream");
+                await using var stream = file.OpenReadStream(maxAllowedSize: 500_000_000);
+                await Api.UploadFileAsync(DataSourceId, Path ?? "", stream, file.Name,
+                    file.ContentType ?? "application/octet-stream");
             }
             catch (Exception ex)
             {
@@ -165,6 +266,27 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to delete: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteFolder(FolderEntryDto folder)
+    {
+        var confirmed = await MessageBox.ConfirmAsync(
+            $"Delete folder '{folder.Name}' and all {folder.FileCount} file(s) inside?");
+        if (!confirmed) return;
+
+        try
+        {
+            var folderPath = string.IsNullOrEmpty(Path)
+                ? folder.Name + "/"
+                : $"{Path}/{folder.Name}/";
+            await Api.DeleteFolderAsync(DataSourceId, folderPath);
+            await LoadAsync();
+            Messenger.AddInformation("Folder deleted.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to delete folder: {ex.Message}");
         }
     }
 

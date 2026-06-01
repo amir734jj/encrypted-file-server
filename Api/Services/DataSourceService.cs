@@ -50,6 +50,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         {
             UserId = userId,
             Name = req.Name.Trim(),
+            EncryptionMethod = req.EncryptionMethod,
             BackendFtpHost = req.BackendFtpHost,
             BackendFtpPort = req.BackendFtpPort,
             BackendFtpUsername = req.BackendFtpUsername,
@@ -75,6 +76,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         await Dal.Update(id, ds =>
         {
             ds.Name = req.Name.Trim();
+            ds.EncryptionMethod = req.EncryptionMethod;
             ds.BackendFtpHost = req.BackendFtpHost;
             ds.BackendFtpPort = req.BackendFtpPort;
             ds.BackendFtpUsername = req.BackendFtpUsername;
@@ -117,7 +119,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
     }
 
     private static DataSourceDto ToDto(DataSource d, long totalSize, int fileCount) =>
-        new(d.Id, d.Name, totalSize, fileCount, d.CreatedAt,
+        new(d.Id, d.Name, d.EncryptionMethod, totalSize, fileCount, d.CreatedAt,
             d.BackendFtpHost, d.BackendFtpPort, d.BackendFtpUsername, d.BackendFtpBasePath, d.BackendFtpUseSsl,
             d.FrontendFtpEnabled, d.FrontendFtpPassword, d.FrontendFtpAllowAnonymous,
             d.FrontendHttpEnabled, d.FrontendHttpPassword, d.FrontendHttpAllowAnonymous);

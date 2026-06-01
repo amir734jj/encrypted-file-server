@@ -3,6 +3,7 @@ namespace Shared.Contracts;
 public record DataSourceDto(
     Guid Id,
     string Name,
+    string EncryptionMethod,
     long TotalFileSize,
     int FileCount,
     DateTimeOffset CreatedAt,

@@ -120,6 +120,9 @@ builder.Services.Scan(scan => scan
     .WithScopedLifetime());
 
 builder.Services.AddSingleton<IEncryptionProvider, AesCtrEncryptionProvider>();
+builder.Services.AddSingleton<IEncryptionProvider, AesGcmEncryptionProvider>();
+builder.Services.AddSingleton<IEncryptionProvider, ChaCha20EncryptionProvider>();
+builder.Services.AddSingleton<Api.Interfaces.IEncryptionProviderFactory, EncryptionProviderFactory>();
 builder.Services.AddSingleton<IBackendStorageProvider, FtpBackendStorageProvider>();
 builder.Services.AddSingleton<IFrontendDataSource, HttpFrontendDataSource>();
 builder.Services.AddSingleton<IFrontendDataSource, FtpFrontendDataSource>();

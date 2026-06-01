@@ -9,6 +9,7 @@ public sealed class DataSource : IEntity
     public Guid UserId { get; set; }
     public User? User { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string EncryptionMethod { get; set; } = "aes-ctr-256";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public string BackendFtpHost { get; set; } = string.Empty;

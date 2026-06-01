@@ -18,51 +18,74 @@ namespace Api.Ftp;
 /// </summary>
 public sealed class EncryptedFileSystemProvider(IServiceScopeFactory scopeFactory) : IFileSystemClassFactory
 {
-    public async Task<IUnixFileSystem> Create(IAccountInformation accountInformation)
+    public Task<IUnixFileSystem> Create(IAccountInformation accountInformation)
     {
-        var userId = accountInformation.FtpUser.GetUserId();
         var scope = scopeFactory.CreateScope();
-        return new EncryptedUnixFileSystem(scope, userId);
+
+        if (accountInformation.FtpUser.IsAnonymous())
+            return Task.FromResult<IUnixFileSystem>(new EncryptedUnixFileSystem(scope, userId: null));
+
+        var userId = accountInformation.FtpUser.GetUserId();
+        return Task.FromResult<IUnixFileSystem>(new EncryptedUnixFileSystem(scope, userId));
     }
 }
 
-/// <summary>
-/// Virtual filesystem backed by encrypted storage. Files appear decrypted to FTP clients.
-/// </summary>
 public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 {
     private readonly IServiceScope _scope;
-    private readonly Guid _userId;
+    private readonly Guid? _userId;
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
-    private readonly IEncryptionProvider _encryption;
+    private readonly IEncryptionProviderFactory _encryptionFactory;
     private readonly UserManager<User> _userManager;
+    private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
 
-    public EncryptedUnixFileSystem(IServiceScope scope, Guid userId)
+    public EncryptedUnixFileSystem(IServiceScope scope, Guid? userId)
     {
         _scope = scope;
         _userId = userId;
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
-        _encryption = scope.ServiceProvider.GetRequiredService<IEncryptionProvider>();
+        _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
         _userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
 
-        Root = new VirtualDirectoryEntry("/", null);
+        Root = new VirtualDirectoryEntry("/", null, null);
     }
 
-    private byte[]? _masterKey;
-    private async Task<byte[]> GetMasterKeyAsync()
+    private bool IsAnonymous => !_userId.HasValue;
+
+    private async Task<byte[]> GetMasterKeyAsync(Guid ownerId)
     {
-        if (_masterKey is not null) return _masterKey;
-        var user = await _userManager.FindByIdAsync(_userId.ToString());
-        _masterKey = Convert.FromBase64String(user!.MasterKeyBase64);
-        return _masterKey;
+        if (_masterKeyCache.TryGetValue(ownerId, out var cached))
+            return cached;
+        var user = await _userManager.FindByIdAsync(ownerId.ToString());
+        var key = Convert.FromBase64String(user!.MasterKeyBase64);
+        _masterKeyCache[ownerId] = key;
+        return key;
     }
 
-    private string DecryptFileName(EncryptedFile f, byte[] masterKey)
+    private async Task<byte[]> GetMasterKeyForDataSourceAsync(Guid dataSourceId)
+    {
+        var ds = await _db.DataSources.FirstAsync(d => d.Id == dataSourceId);
+        return await GetMasterKeyAsync(ds.UserId);
+    }
+
+    private async Task<IEncryptionProvider> GetEncryptionForDataSourceAsync(Guid dataSourceId)
+    {
+        var ds = await _db.DataSources.FirstAsync(d => d.Id == dataSourceId);
+        return _encryptionFactory.GetProvider(ds.EncryptionMethod);
+    }
+
+    private string DecryptFileName(EncryptedFile f, byte[] masterKey, IEncryptionProvider encryption)
     {
         var iv = Convert.FromBase64String(f.IvBase64);
-        return _encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+        return encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+    }
+
+    private void EnsureAuthenticated()
+    {
+        if (IsAnonymous)
+            throw new UnauthorizedAccessException("Anonymous users cannot modify files.");
     }
 
     public bool SupportsNonEmptyDirectoryDelete => true;
@@ -75,29 +98,56 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     {
         if (directoryEntry is VirtualDirectoryEntry { DataSourceId: null })
         {
-            // Root directory: list data sources as subdirectories
-            var dataSources = await _db.DataSources
-                .Where(d => d.UserId == _userId)
-                .OrderBy(d => d.Name)
-                .ToListAsync(ct);
+            var dataSources = IsAnonymous
+                ? await _db.DataSources
+                    .Where(d => d.FrontendFtpAllowAnonymous)
+                    .OrderBy(d => d.Name).ToListAsync(ct)
+                : await _db.DataSources
+                    .Where(d => d.UserId == _userId && d.FrontendFtpEnabled)
+                    .OrderBy(d => d.Name).ToListAsync(ct);
 
             return dataSources
-                .Select(ds => (IUnixFileSystemEntry)new VirtualDirectoryEntry(ds.Name, ds.Id))
+                .Select(ds => (IUnixFileSystemEntry)new VirtualDirectoryEntry(ds.Name, ds.Id, ""))
                 .ToList();
         }
 
-        if (directoryEntry is VirtualDirectoryEntry { DataSourceId: { } dsId })
+        if (directoryEntry is VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
         {
-            // Data source directory: list files (decrypt names in memory)
-            var files = await _db.EncryptedFiles
-                .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
-                .ToListAsync(ct);
+            var currentPath = vde.VirtualPath ?? "";
 
-            var masterKey = await GetMasterKeyAsync();
-            return files
-                .Select(f => (IUnixFileSystemEntry)new VirtualFileEntry(f, DecryptFileName(f, masterKey)))
-                .OrderBy(e => e.Name)
-                .ToList();
+            var query = _db.EncryptedFiles.Where(f => f.DataSourceId == dsId);
+            if (_userId.HasValue)
+                query = query.Where(f => f.UserId == _userId.Value);
+            var files = await query.ToListAsync(ct);
+
+            var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
+            var encryption = await GetEncryptionForDataSourceAsync(dsId);
+            var results = new List<IUnixFileSystemEntry>();
+            var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var f in files)
+            {
+                var fullPath = DecryptFileName(f, masterKey, encryption);
+                if (!fullPath.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var relativePath = fullPath[currentPath.Length..];
+                var slashIndex = relativePath.IndexOf('/');
+
+                if (slashIndex < 0)
+                {
+                    results.Add(new VirtualFileEntry(f, relativePath));
+                }
+                else
+                {
+                    var folderName = relativePath[..slashIndex];
+                    if (seenFolders.Add(folderName))
+                        results.Add(new VirtualDirectoryEntry(folderName, dsId, currentPath + folderName + "/"));
+                }
+            }
+
+            return results.OrderBy(e => e is VirtualDirectoryEntry ? 0 : 1)
+                .ThenBy(e => e.Name).ToList();
         }
 
         return [];
@@ -108,21 +158,44 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     {
         if (directoryEntry is VirtualDirectoryEntry { DataSourceId: null })
         {
-            var ds = await _db.DataSources
-                .FirstOrDefaultAsync(d => d.UserId == _userId && d.Name == name, ct);
-            return ds is null ? null : new VirtualDirectoryEntry(ds.Name, ds.Id);
+            var ds = IsAnonymous
+                ? await _db.DataSources.FirstOrDefaultAsync(
+                    d => d.FrontendFtpAllowAnonymous && d.Name == name, ct)
+                : await _db.DataSources.FirstOrDefaultAsync(
+                    d => d.UserId == _userId && d.FrontendFtpEnabled && d.Name == name, ct);
+            return ds is null ? null : new VirtualDirectoryEntry(ds.Name, ds.Id, "");
         }
 
-        if (directoryEntry is VirtualDirectoryEntry { DataSourceId: { } dsId })
+        if (directoryEntry is VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
         {
-            // File names are encrypted — load all, decrypt, then match
-            var files = await _db.EncryptedFiles
-                .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
-                .ToListAsync(ct);
+            var currentPath = vde.VirtualPath ?? "";
 
-            var masterKey = await GetMasterKeyAsync();
-            var match = files.FirstOrDefault(f => DecryptFileName(f, masterKey) == name);
-            return match is null ? null : new VirtualFileEntry(match, name);
+            var query = _db.EncryptedFiles.Where(f => f.DataSourceId == dsId);
+            if (_userId.HasValue)
+                query = query.Where(f => f.UserId == _userId.Value);
+            var files = await query.ToListAsync(ct);
+
+            var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
+            var encryption = await GetEncryptionForDataSourceAsync(dsId);
+            foreach (var f in files)
+            {
+                var fullPath = DecryptFileName(f, masterKey, encryption);
+                if (!fullPath.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var relativePath = fullPath[currentPath.Length..];
+                var slashIndex = relativePath.IndexOf('/');
+
+                if (slashIndex < 0 && string.Equals(relativePath, name, StringComparison.OrdinalIgnoreCase))
+                    return new VirtualFileEntry(f, relativePath);
+
+                if (slashIndex >= 0)
+                {
+                    var folderName = relativePath[..slashIndex];
+                    if (string.Equals(folderName, name, StringComparison.OrdinalIgnoreCase))
+                        return new VirtualDirectoryEntry(folderName, dsId, currentPath + folderName + "/");
+                }
+            }
         }
 
         return null;
@@ -133,14 +206,11 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         if (fileEntry is not VirtualFileEntry vfe)
             throw new InvalidOperationException("Unknown file entry type.");
 
-        var user = await _userManager.FindByIdAsync(_userId.ToString());
-        var masterKey = Convert.FromBase64String(user!.MasterKeyBase64);
+        var masterKey = await GetMasterKeyForDataSourceAsync(vfe.EncryptedFile.DataSourceId);
         var stream = await _fileStorage.OpenDecryptedStreamAsync(vfe.EncryptedFile, masterKey);
-        _masterKey = masterKey;
 
         if (startPosition > 0)
         {
-            // For resume support, skip bytes. Not ideal for encrypted streams but functional.
             var buffer = new byte[8192];
             long remaining = startPosition;
             while (remaining > 0)
@@ -158,19 +228,24 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     public async Task<IBackgroundTransfer?> CreateAsync(
         IUnixDirectoryEntry targetDirectory, string fileName, Stream data, CancellationToken ct)
     {
-        if (targetDirectory is not VirtualDirectoryEntry { DataSourceId: { } dsId })
+        EnsureAuthenticated();
+
+        if (targetDirectory is not VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
             throw new InvalidOperationException("Cannot create files in the root directory. Use a data source folder.");
 
         var dsOwned = await _db.DataSources.AnyAsync(d => d.Id == dsId && d.UserId == _userId, ct);
         if (!dsOwned)
             throw new UnauthorizedAccessException("Data source does not belong to the current user.");
 
-        await _fileStorage.StoreFileAsync(_userId, dsId, fileName, null, data);
+        var fullPath = (vde.VirtualPath ?? "") + fileName;
+        await _fileStorage.StoreFileAsync(_userId!.Value, dsId, fullPath, null, data);
         return null;
     }
 
     public async Task<IBackgroundTransfer?> ReplaceAsync(IUnixFileEntry fileEntry, Stream data, CancellationToken ct)
     {
+        EnsureAuthenticated();
+
         if (fileEntry is not VirtualFileEntry vfe)
             throw new InvalidOperationException("Unknown file entry type.");
 
@@ -178,14 +253,18 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
             throw new UnauthorizedAccessException("File does not belong to the current user.");
 
         var dsId = vfe.EncryptedFile.DataSourceId;
-        var fileName = vfe.DecryptedName;
+        var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
+        var encryption = await GetEncryptionForDataSourceAsync(dsId);
+        var fullPath = DecryptFileName(vfe.EncryptedFile, masterKey, encryption);
         await _fileStorage.DeleteFileAsync(vfe.EncryptedFile);
-        await _fileStorage.StoreFileAsync(_userId, dsId, fileName, null, data);
+        await _fileStorage.StoreFileAsync(_userId!.Value, dsId, fullPath, null, data);
         return null;
     }
 
     public async Task UnlinkAsync(IUnixFileSystemEntry entry, CancellationToken ct)
     {
+        EnsureAuthenticated();
+
         if (entry is VirtualFileEntry vfe)
         {
             if (vfe.EncryptedFile.UserId != _userId)
@@ -193,33 +272,119 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 
             await _fileStorage.DeleteFileAsync(vfe.EncryptedFile);
         }
-        else if (entry is VirtualDirectoryEntry { DataSourceId: { } dsId })
+        else if (entry is VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
         {
-            var ds = await _db.DataSources.FirstOrDefaultAsync(
-                d => d.Id == dsId && d.UserId == _userId, ct);
-            if (ds is null) return;
+            if (string.IsNullOrEmpty(vde.VirtualPath))
+            {
+                var ds = await _db.DataSources.FirstOrDefaultAsync(
+                    d => d.Id == dsId && d.UserId == _userId, ct);
+                if (ds is null) return;
 
-            var files = await _db.EncryptedFiles
-                .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
-                .ToListAsync(ct);
-            foreach (var f in files)
-                await _fileStorage.DeleteFileAsync(f);
+                var allFiles = await _db.EncryptedFiles
+                    .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
+                    .ToListAsync(ct);
+                foreach (var f in allFiles)
+                    await _fileStorage.DeleteFileAsync(f);
 
-            _db.DataSources.Remove(ds);
-            await _db.SaveChangesAsync(ct);
+                _db.DataSources.Remove(ds);
+                await _db.SaveChangesAsync(ct);
+            }
+            else
+            {
+                var masterKey = await GetMasterKeyForDataSourceAsync(dsId);
+                var encryption = await GetEncryptionForDataSourceAsync(dsId);
+                var allFiles = await _db.EncryptedFiles
+                    .Where(f => f.DataSourceId == dsId && f.UserId == _userId)
+                    .ToListAsync(ct);
+
+                foreach (var f in allFiles)
+                {
+                    var fullPath = DecryptFileName(f, masterKey, encryption);
+                    if (fullPath.StartsWith(vde.VirtualPath, StringComparison.OrdinalIgnoreCase))
+                        await _fileStorage.DeleteFileAsync(f);
+                }
+            }
         }
     }
 
     public Task<IUnixDirectoryEntry> CreateDirectoryAsync(
         IUnixDirectoryEntry targetDirectory, string directoryName, CancellationToken ct)
     {
+        EnsureAuthenticated();
+
+        if (targetDirectory is VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
+        {
+            var newPath = (vde.VirtualPath ?? "") + directoryName + "/";
+            return Task.FromResult<IUnixDirectoryEntry>(new VirtualDirectoryEntry(directoryName, dsId, newPath));
+        }
+
         throw new NotSupportedException("Data sources cannot be created via FTP. Use the web interface to configure backend storage.");
     }
 
-    public Task<IUnixFileSystemEntry> MoveAsync(IUnixDirectoryEntry parent, IUnixFileSystemEntry source,
+    public async Task<IUnixFileSystemEntry> MoveAsync(IUnixDirectoryEntry parent, IUnixFileSystemEntry source,
         IUnixDirectoryEntry target, string fileName, CancellationToken ct)
     {
-        throw new NotSupportedException("Move is not supported.");
+        EnsureAuthenticated();
+
+        if (target is not VirtualDirectoryEntry { DataSourceId: { } targetDsId } targetVde)
+            throw new InvalidOperationException("Cannot move to root directory.");
+
+        var targetPath = targetVde.VirtualPath ?? "";
+
+        if (source is VirtualFileEntry vfe)
+        {
+            if (vfe.EncryptedFile.UserId != _userId)
+                throw new UnauthorizedAccessException("File does not belong to the current user.");
+            if (vfe.EncryptedFile.DataSourceId != targetDsId)
+                throw new NotSupportedException("Cannot move files between data sources.");
+
+            var masterKey = await GetMasterKeyForDataSourceAsync(targetDsId);
+            var encryption = await GetEncryptionForDataSourceAsync(targetDsId);
+            var iv = Convert.FromBase64String(vfe.EncryptedFile.IvBase64);
+            var newFullPath = targetPath + fileName;
+            var encryptedName = encryption.EncryptString(newFullPath, masterKey, iv);
+
+            vfe.EncryptedFile.OriginalFileName = encryptedName;
+            vfe.EncryptedFile.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+
+            return new VirtualFileEntry(vfe.EncryptedFile, fileName);
+        }
+
+        if (source is VirtualDirectoryEntry { DataSourceId: { } sourceDsId } sourceVde)
+        {
+            if (sourceDsId != targetDsId)
+                throw new NotSupportedException("Cannot move directories between data sources.");
+
+            var oldPrefix = sourceVde.VirtualPath ?? "";
+            if (string.IsNullOrEmpty(oldPrefix))
+                throw new NotSupportedException("Cannot move a data source root via FTP.");
+
+            var newPrefix = targetPath + fileName + "/";
+            var masterKey = await GetMasterKeyForDataSourceAsync(sourceDsId);
+            var encryption = await GetEncryptionForDataSourceAsync(sourceDsId);
+
+            var allFiles = await _db.EncryptedFiles
+                .Where(f => f.DataSourceId == sourceDsId && f.UserId == _userId)
+                .ToListAsync(ct);
+
+            foreach (var f in allFiles)
+            {
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+                if (!fullPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var newFullPath = newPrefix + fullPath[oldPrefix.Length..];
+                f.OriginalFileName = encryption.EncryptString(newFullPath, masterKey, iv);
+                f.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+
+            await _db.SaveChangesAsync(ct);
+            return new VirtualDirectoryEntry(fileName, targetDsId, newPrefix);
+        }
+
+        throw new InvalidOperationException("Unknown entry type.");
     }
 
     public Task<IBackgroundTransfer?> AppendAsync(IUnixFileEntry fileEntry, long? startPosition, Stream data, CancellationToken ct)
@@ -242,9 +407,10 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 /// <summary>
 /// Virtual directory representing either the root or a data source folder.
 /// </summary>
-public sealed class VirtualDirectoryEntry(string name, Guid? dataSourceId) : IUnixDirectoryEntry
+public sealed class VirtualDirectoryEntry(string name, Guid? dataSourceId, string? virtualPath) : IUnixDirectoryEntry
 {
     public Guid? DataSourceId => dataSourceId;
+    public string? VirtualPath => virtualPath;
     public string Name => name;
     public IUnixPermissions Permissions => new VirtualPermissions();
     public DateTimeOffset? LastWriteTime => DateTimeOffset.UtcNow;
@@ -252,7 +418,7 @@ public sealed class VirtualDirectoryEntry(string name, Guid? dataSourceId) : IUn
     public long NumberOfLinks => 1;
     public string Owner => "owner";
     public string Group => "group";
-    public bool IsDeletable => dataSourceId is not null; // Can't delete root
+    public bool IsDeletable => dataSourceId is not null;
     public bool IsRoot => dataSourceId is null && name == "/";
 }
 

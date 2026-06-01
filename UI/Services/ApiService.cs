@@ -83,15 +83,17 @@ public sealed class ApiService(
     public Task UpdateDataSourceAsync(Guid id, UpdateDataSourceRequest req) => dataSourcesApi.UpdateAsync(id, req);
     public Task DeleteDataSourceAsync(Guid id) => dataSourcesApi.DeleteAsync(id);
 
-    public Task<List<FileEntryDto>> GetFilesAsync(Guid dataSourceId) => filesApi.GetAllAsync(dataSourceId);
+    public Task<DirectoryListingDto> GetFilesAsync(Guid dataSourceId, string path = "")
+        => filesApi.GetAllAsync(dataSourceId, path);
 
-    public async Task<FileEntryDto> UploadFileAsync(Guid dataSourceId, Stream fileStream, string fileName, string contentType)
+    public async Task<FileEntryDto> UploadFileAsync(Guid dataSourceId, string path, Stream fileStream, string fileName, string contentType)
     {
         var streamPart = new StreamPart(fileStream, fileName, contentType);
-        return await filesApi.UploadAsync(dataSourceId, streamPart);
+        return await filesApi.UploadAsync(dataSourceId, path, streamPart);
     }
 
     public Task DeleteFileAsync(Guid id) => filesApi.DeleteAsync(id);
+    public Task DeleteFolderAsync(Guid dataSourceId, string path) => filesApi.DeleteFolderAsync(dataSourceId, path);
 
     public Task<GlobalConfigModel> GetGlobalConfigAsync() => globalConfigApi.GetAsync();
     public Task SaveGlobalConfigAsync(GlobalConfigModel config) => globalConfigApi.SaveAsync(config);

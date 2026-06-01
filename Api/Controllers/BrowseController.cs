@@ -16,7 +16,7 @@ namespace Api.Controllers;
 public sealed class BrowseController(
     IEfRepository repository,
     IFileStorageService fileStorage,
-    IEncryptionProvider encryption,
+    IEncryptionProviderFactory encryptionFactory,
     UserManager<User> users) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
@@ -37,48 +37,79 @@ public sealed class BrowseController(
             dataSources.Select(ds => (ds.Name, $"/browse/{ds.Id}/", (long?)null, (DateTimeOffset?)ds.CreatedAt))), "text/html");
     }
 
-    [HttpGet("{dataSourceId:guid}/")]
-    public async Task<IActionResult> ListFiles(Guid dataSourceId)
+    [HttpGet("{dataSourceId:guid}/{**path}")]
+    public async Task<IActionResult> ListOrDownload(Guid dataSourceId, string? path = null)
     {
         var (ds, masterKey, error) = await AuthorizeDataSource(dataSourceId);
         if (error is not null) return error;
 
-        var files = (await FileDal.GetAll(
+        var encryption = encryptionFactory.GetProvider(ds!.EncryptionMethod);
+        path = NormalizePath(path);
+
+        // If path ends with a GUID, try to serve it as a file download
+        if (TryParseFileId(path, out var fileId))
+        {
+            var matchFiles = (await FileDal.GetAll(
+                filterExprs: [f => f.Id == fileId && f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
+                project: f => f,
+                maxResults: 1)).ToList();
+            if (matchFiles.Count > 0)
+            {
+                var file = matchFiles.First();
+                var iv = Convert.FromBase64String(file.IvBase64);
+                var fullPath = encryption.DecryptString(file.OriginalFileName, masterKey!, iv);
+                var fileName = System.IO.Path.GetFileName(fullPath);
+                var contentType = file.ContentType is not null
+                    ? encryption.DecryptString(file.ContentType, masterKey!, iv)
+                    : "application/octet-stream";
+                var stream = await fileStorage.OpenDecryptedStreamAsync(file, masterKey!);
+                return File(stream, contentType, fileName);
+            }
+        }
+
+        // Directory listing
+        var allFiles = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
             project: f => f)).ToList();
 
-        var entries = files.Select(f =>
+        var entries = new List<(string Name, string Href, long? Size, DateTimeOffset? Modified)>();
+        var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var f in allFiles)
         {
             var iv = Convert.FromBase64String(f.IvBase64);
-            var name = encryption.DecryptString(f.OriginalFileName, masterKey!, iv);
-            return (name, $"/browse/{dataSourceId}/{f.Id}", (long?)f.OriginalFileSize, (DateTimeOffset?)f.CreatedAt);
-        }).OrderBy(e => e.name).ToList();
+            var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey!, iv);
 
-        return Content(RenderDirectoryPage($"/{ds!.Name}/ - File Server", $"/browse/{dataSourceId}",
-            entries, parentHref: "/browse/"), "text/html");
-    }
+            if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+                continue;
 
-    [HttpGet("{dataSourceId:guid}/{fileId:guid}")]
-    public async Task<IActionResult> DownloadFile(Guid dataSourceId, Guid fileId)
-    {
-        var (ds, masterKey, error) = await AuthorizeDataSource(dataSourceId);
-        if (error is not null) return error;
+            var relativePath = fullPath[path.Length..];
+            var slashIndex = relativePath.IndexOf('/');
 
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.Id == fileId && f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
-            project: f => f,
-            maxResults: 1)).ToList();
-        if (files.Count == 0) return NotFound();
+            if (slashIndex < 0)
+            {
+                entries.Add((relativePath, $"/browse/{dataSourceId}/{path}{f.Id}", f.OriginalFileSize, f.CreatedAt));
+            }
+            else
+            {
+                var folderName = relativePath[..slashIndex];
+                if (seenFolders.Add(folderName))
+                    entries.Add((folderName, $"/browse/{dataSourceId}/{path}{folderName}/", null, null));
+            }
+        }
 
-        var file = files.First();
-        var iv = Convert.FromBase64String(file.IvBase64);
-        var fileName = encryption.DecryptString(file.OriginalFileName, masterKey!, iv);
-        var contentType = file.ContentType is not null
-            ? encryption.DecryptString(file.ContentType, masterKey!, iv)
-            : "application/octet-stream";
+        entries = entries
+            .OrderBy(e => e.Href.EndsWith('/') ? 0 : 1)
+            .ThenBy(e => e.Name)
+            .ToList();
 
-        var stream = await fileStorage.OpenDecryptedStreamAsync(file, masterKey!);
-        return File(stream, contentType, fileName);
+        var displayPath = string.IsNullOrEmpty(path) ? $"/{ds!.Name}/" : $"/{ds!.Name}/{path}";
+        var parentHref = string.IsNullOrEmpty(path)
+            ? "/browse/"
+            : $"/browse/{dataSourceId}/{GetParentPath(path)}";
+
+        return Content(RenderDirectoryPage($"{displayPath} - File Server",
+            $"/browse/{dataSourceId}/{path}", entries, parentHref), "text/html");
     }
 
     private Guid? GetAuthenticatedUserId()
@@ -189,4 +220,27 @@ public sealed class BrowseController(
         < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
         _ => $"{bytes / (1024.0 * 1024 * 1024):F1} GB"
     };
+
+    private static string NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        path = path.Replace('\\', '/').Trim('/');
+        return path.Length > 0 ? path + "/" : string.Empty;
+    }
+
+    private static string GetParentPath(string path)
+    {
+        var trimmed = path.TrimEnd('/');
+        var lastSlash = trimmed.LastIndexOf('/');
+        return lastSlash < 0 ? "" : trimmed[..(lastSlash + 1)];
+    }
+
+    private static bool TryParseFileId(string path, out Guid fileId)
+    {
+        fileId = Guid.Empty;
+        var trimmed = path.TrimEnd('/');
+        var lastSlash = trimmed.LastIndexOf('/');
+        var segment = lastSlash < 0 ? trimmed : trimmed[(lastSlash + 1)..];
+        return Guid.TryParse(segment, out fileId);
+    }
 }

@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Copy solution and project files
-COPY EncryptedFileServer.sln .
+COPY EncryptedFileServer.slnx .
 COPY Shared/Shared.csproj Shared/
 COPY Api/Api.csproj Api/
 COPY UI/UI.csproj UI/
@@ -47,5 +47,7 @@ ENV Storage__BasePath=/app/storage
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -f http://localhost:5000/api/health || exit 1
+
+ENTRYPOINT ["dotnet", "Api.dll"]
 
 ENTRYPOINT ["dotnet", "Api.dll"]

@@ -10,7 +10,7 @@ namespace Api.Services;
 
 public sealed class FileStorageService(
     IEfRepository repository,
-    IEncryptionProvider encryption,
+    IEncryptionProviderFactory encryptionFactory,
     IBackendStorageProvider storage,
     UserManager<User> userManager) : IFileStorageService
 {
@@ -27,6 +27,7 @@ public sealed class FileStorageService(
             throw new UnauthorizedAccessException("Data source does not belong to the user.");
 
         var ds = dataSources.First();
+        var encryption = encryptionFactory.GetProvider(ds.EncryptionMethod);
         var user = await userManager.FindByIdAsync(userId.ToString())
             ?? throw new InvalidOperationException("User not found.");
 
@@ -54,7 +55,7 @@ public sealed class FileStorageService(
             Id = fileId,
             UserId = userId,
             DataSourceId = dataSourceId,
-            OriginalFileName = encryption.EncryptString(Path.GetFileName(fileName), masterKey, iv),
+            OriginalFileName = encryption.EncryptString(fileName, masterKey, iv),
             StoragePath = storagePath,
             ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
             OriginalFileSize = originalSize,
@@ -75,6 +76,7 @@ public sealed class FileStorageService(
             throw new InvalidOperationException("Data source not found.");
 
         var ds = dataSources.First();
+        var encryption = encryptionFactory.GetProvider(ds.EncryptionMethod);
         var iv = Convert.FromBase64String(file.IvBase64);
         var connection = ds.ToBackendConnectionInfo();
         var fileStream = await storage.OpenReadAsync(connection, file.StoragePath);
