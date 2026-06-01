@@ -124,7 +124,12 @@ else
             <div class="col-6"><HxInputText Label="Password" @bind-Value="_backendPass" Type="InputType.Password" /></div>
         </div>
         <div class="mb-3">
-            <HxInputText Label="Base Path" @bind-Value="_backendPath" Placeholder="/" />
+            <HxInputText Label="Base Path" @bind-Value="_backendPath" Placeholder="backup"
+                         Hint="Relative path on the remote server (no leading slash). e.g. backup, data/files" />
+            @if (_backendPath.StartsWith('/'))
+            {
+                <div class="text-warning small mt-1"><i class="bi bi-exclamation-triangle me-1"></i>Leading slash will be removed. Use a relative path.</div>
+            }
         </div>
         <div class="mb-3">
             <HxSwitch @bind-Value="_backendSsl" Text="Use SSL/TLS" />
@@ -223,7 +228,7 @@ else
         _backendPort = 21;
         _backendUser = string.Empty;
         _backendPass = string.Empty;
-        _backendPath = "/";
+        _backendPath = string.Empty;
         _backendSsl = false;
         _masterPassword = string.Empty;
         _ftpEnabled = false;
@@ -281,7 +286,7 @@ else
     {
         try
         {
-            var backend = new BackendRequest(_backendProtocol, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath, _backendSsl, _encryptionMethod, _masterPassword);
+            var backend = new BackendRequest(_backendProtocol, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath.TrimStart('/'), _backendSsl, _encryptionMethod, _masterPassword);
             var frontends = new List<FrontendRequest>();
             if (_ftpEnabled) frontends.Add(new FrontendRequest(FrontendType.Ftp, _ftpAnon));
             if (_httpEnabled) frontends.Add(new FrontendRequest(FrontendType.Http, _httpAnon));
