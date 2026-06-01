@@ -200,6 +200,9 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                     }
                 }
             }
+
+            // Allow navigating into any path — empty folders are valid for uploading files into
+            return new VirtualDirectoryEntry(name, dsId, currentPath + name + "/");
         }
 
         return null;
