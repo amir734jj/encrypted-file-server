@@ -232,6 +232,52 @@ foreach (var frontend in frontends)
     }
 }
 
+// Diagnostic: read last N lines of log file
+app.MapGet("/api/diagnostics/logs", (int? lines) =>
+{
+    var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+    if (!Directory.Exists(logDir))
+        return Results.Ok(new { error = "No logs directory", baseDir = AppContext.BaseDirectory });
+    var logFile = Directory.GetFiles(logDir, "api-*.log")
+        .OrderByDescending(f => f).FirstOrDefault();
+    if (logFile == null)
+        return Results.Ok(new { error = "No log files found" });
+    var allLines = File.ReadAllLines(logFile);
+    var count = Math.Min(lines ?? 50, allLines.Length);
+    return Results.Ok(new { file = Path.GetFileName(logFile), totalLines = allLines.Length, lines = allLines[^count..] });
+}).AllowAnonymous();
+
+// Diagnostic: try resolving FTP connection services (tests scope creation)
+app.MapGet("/api/diagnostics/ftp-scope", (IServiceProvider sp) =>
+{
+    var results = new Dictionary<string, string>();
+    try
+    {
+        using var scope = sp.CreateScope();
+        var services = new[] {
+            "FubarDev.FtpServer.TcpSocketClientAccessor",
+            "FubarDev.FtpServer.IFtpConnection",
+            "FubarDev.FtpServer.IFtpConnectionAccessor",
+            "FubarDev.FtpServer.Localization.IFtpServerMessages",
+        };
+        foreach (var svcName in services)
+        {
+            try
+            {
+                var type = AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(a => { try { return a.GetTypes(); } catch { return []; } })
+                    .FirstOrDefault(t => t.FullName == svcName);
+                if (type == null) { results[svcName] = "TYPE_NOT_FOUND"; continue; }
+                var svc = scope.ServiceProvider.GetService(type);
+                results[svcName] = svc != null ? "OK" : "NULL";
+            }
+            catch (Exception ex) { results[svcName] = $"ERROR: {ex.GetType().Name}: {ex.Message}"; }
+        }
+    }
+    catch (Exception ex) { results["scope"] = $"ERROR: {ex.GetType().Name}: {ex.Message}"; }
+    return Results.Ok(results);
+}).AllowAnonymous();
+
 // Diagnostic: direct FTP server state
 app.MapGet("/api/diagnostics/ftp-state", (IServiceProvider sp) =>
 {
