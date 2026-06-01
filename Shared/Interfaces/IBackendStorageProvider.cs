@@ -20,6 +20,9 @@ public interface IBackendStorageProvider
 
     /// <summary>Checks whether a stored file exists on the remote backend.</summary>
     Task<bool> ExistsAsync(BackendConnectionInfo connection, string storagePath, CancellationToken ct = default);
+
+    /// <summary>Renames/moves a file on the remote backend. Returns the new full storage path.</summary>
+    Task<string> RenameAsync(BackendConnectionInfo connection, string oldStoragePath, string newRelativePath, CancellationToken ct = default);
 }
 
 /// <summary>

@@ -38,6 +38,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly IEncryptionProviderFactory _encryptionFactory;
+    private readonly IBackendStorageProvider _backendStorage;
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
 
     public EncryptedUnixFileSystem(IServiceScope scope, Guid? userId)
@@ -47,6 +48,7 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
+        _backendStorage = scope.ServiceProvider.GetRequiredService<IBackendStorageProvider>();
 
         Root = new VirtualDirectoryEntry("/", null, null);
     }
@@ -339,6 +341,15 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
 
             vfe.EncryptedFile.OriginalFileName = encryptedName;
             vfe.EncryptedFile.UpdatedAt = DateTimeOffset.UtcNow;
+
+            // For None encryption, also rename the actual file on the backend
+            var ds = await _db.DataSources.FirstAsync(d => d.Id == targetDsId, ct);
+            if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
+            {
+                var connection = ds.ToBackendConnectionInfo();
+                vfe.EncryptedFile.StoragePath = await _backendStorage.RenameAsync(connection, vfe.EncryptedFile.StoragePath, newFullPath, ct);
+            }
+
             await _db.SaveChangesAsync(ct);
 
             return new VirtualFileEntry(vfe.EncryptedFile, fileName);
@@ -371,6 +382,14 @@ public sealed class EncryptedUnixFileSystem : IUnixFileSystem
                 var newFullPath = newPrefix + fullPath[oldPrefix.Length..];
                 f.OriginalFileName = encryption.EncryptString(newFullPath, masterKey, iv);
                 f.UpdatedAt = DateTimeOffset.UtcNow;
+
+                // For None encryption, also rename the actual file on the backend
+                var ds = await _db.DataSources.FirstAsync(d => d.Id == sourceDsId, ct);
+                if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
+                {
+                    var connection = ds.ToBackendConnectionInfo();
+                    f.StoragePath = await _backendStorage.RenameAsync(connection, f.StoragePath, newFullPath, ct);
+                }
             }
 
             await _db.SaveChangesAsync(ct);

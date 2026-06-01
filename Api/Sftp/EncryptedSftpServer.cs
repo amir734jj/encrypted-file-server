@@ -93,17 +93,17 @@ public sealed class EncryptedSftpServer : IDisposable
     {
         using var scope = _scopeFactory.CreateScope();
 
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         if (string.Equals(username, "anonymous", StringComparison.OrdinalIgnoreCase))
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var hasAnon = db.DataSources
                 .Include(d => d.Frontends)
                 .Any(d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous));
             return (hasAnon, null);
         }
 
-        var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var ticket = db2.AccessTickets
+        var ticket = db.AccessTickets
             .FirstOrDefault(t => t.Username == username
                 && t.Password == password
                 && t.ExpiresAt > DateTimeOffset.UtcNow);

@@ -66,6 +66,7 @@ public sealed class SftpSubsystem : IDisposable
     private readonly AppDbContext _db;
     private readonly IFileStorageService _fileStorage;
     private readonly IEncryptionProviderFactory _encryptionFactory;
+    private readonly IBackendStorageProvider _backendStorage;
     private readonly Dictionary<string, object> _handles = new();
     private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
@@ -86,6 +87,7 @@ public sealed class SftpSubsystem : IDisposable
         _db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
+        _backendStorage = scope.ServiceProvider.GetRequiredService<IBackendStorageProvider>();
     }
 
     public void Start()
@@ -564,6 +566,14 @@ public sealed class SftpSubsystem : IDisposable
         var iv = Convert.FromBase64String(file.IvBase64);
 
         file.OriginalFileName = encryption.EncryptString(newParts[1], masterKey, iv);
+
+        // For None encryption, also rename the actual file on the backend
+        if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
+        {
+            var connection = ds.ToBackendConnectionInfo();
+            file.StoragePath = await _backendStorage.RenameAsync(connection, file.StoragePath, newParts[1]);
+        }
+
         await _db.SaveChangesAsync();
         InvalidateCache();
         SendStatus(id, SSH_FX_OK);

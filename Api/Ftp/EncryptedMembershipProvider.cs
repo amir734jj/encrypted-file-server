@@ -12,10 +12,10 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
     public async Task<MemberValidationResult> ValidateUserAsync(string username, string password)
     {
         using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         if (string.Equals(username, "anonymous", StringComparison.OrdinalIgnoreCase))
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var hasAnonymous = await db.DataSources.AnyAsync(d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous));
             if (!hasAnonymous)
                 return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
@@ -27,8 +27,7 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
                 new ClaimsPrincipal(anonIdentity));
         }
 
-        var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var ticket = await db2.AccessTickets
+        var ticket = await db.AccessTickets
             .FirstOrDefaultAsync(t => t.Username == username
                 && t.Password == password
                 && t.ExpiresAt > DateTimeOffset.UtcNow);

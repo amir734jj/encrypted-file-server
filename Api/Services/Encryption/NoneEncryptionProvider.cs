@@ -46,7 +46,18 @@ public sealed class NoneEncryptionProvider : IEncryptionProvider
         public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) => inner.WriteAsync(buffer, offset, count, ct);
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) => inner.WriteAsync(buffer, ct);
-        protected override void Dispose(bool disposing) => base.Dispose(disposing);
-        public override ValueTask DisposeAsync() => default;
+
+        protected override void Dispose(bool disposing)
+        {
+            // Do NOT dispose inner — the caller (StreamingWriteHandle) disposes the backend stream separately
+            if (disposing) inner.Flush();
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await inner.FlushAsync();
+            // Do NOT dispose inner
+        }
     }
 }

@@ -51,6 +51,20 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         return await client.FileExists(storagePath, ct);
     }
 
+    public async Task<string> RenameAsync(
+        BackendConnectionInfo connection, string oldStoragePath, string newRelativePath, CancellationToken ct = default)
+    {
+        var newStoragePath = $"{connection.BasePath.TrimEnd('/')}/{newRelativePath}";
+        using var client = await ConnectAsync(connection, ct);
+
+        var dir = Path.GetDirectoryName(newStoragePath)?.Replace('\\', '/');
+        if (!string.IsNullOrEmpty(dir) && !await client.DirectoryExists(dir, ct))
+            await client.CreateDirectory(dir, ct);
+
+        await client.Rename(oldStoragePath, newStoragePath, ct);
+        return newStoragePath;
+    }
+
     private static async Task<AsyncFtpClient> ConnectAsync(BackendConnectionInfo connection, CancellationToken ct)
     {
         var client = new AsyncFtpClient(connection.Host, connection.Username, connection.Password, connection.Port);
