@@ -1,59 +1,32 @@
 # Encrypted File Server
 
-An encrypted file server where users can register, login, and manage encrypted file storage through data sources.
-
-## Architecture
-
-- **Shared** - DTOs, Refit API contracts, shared models
-- **Api** - ASP.NET Core API with Identity, EF Core + PostgreSQL, AES-256-CBC stream encryption, built-in FTP server
-- **UI** - Blazor WebAssembly with Havit Blazor components
+End-to-end encrypted file storage with a Blazor WebAssembly UI, REST API, and built-in FTP server. Files are encrypted at rest on remote FTP backends — the server never stores plaintext.
 
 ## Features
 
-- **User Authentication** - Register/Login with ASP.NET Identity + JWT
-- **Data Sources** - Organize files into named buckets
-- **Stream Encryption** - AES-256-CBC encryption with per-file IV, streamed on read/write
-- **FTP Server** - Built-in FTP server (port 2121) with virtual encrypted filesystem
-- **HTTP Downloads** - Stream-decrypted file downloads via REST API
-- **Web UI** - Havit Blazor dashboard for managing data sources and files
+- **Multi-provider encryption** — AES-256-CTR (streaming), AES-256-GCM (chunked AEAD), or ChaCha20-Poly1305 (chunked AEAD), selectable per data source
+- **Data sources** — named storage buckets, each backed by a configurable FTP server
+- **Folder hierarchy** — virtual directories with breadcrumb navigation, create/delete/move
+- **Dual frontend access** — HTTP file server (`/browse/`) and built-in FTP server (port 2121)
+- **Anonymous access** — optionally allow anonymous read-only access per data source, per frontend
+- **User management** — registration, login (JWT), admin impersonation
+- **Streaming crypto** — constant ~128 KB memory per stream regardless of file size
+- **Web UI** — Blazor WASM with Havit Blazor components
 
-## Encryption
+## Quick Start
 
-- Each user gets a 256-bit random master key on registration
-- Files are encrypted with AES-256-CBC using the user's master key
-- Each file has a unique random IV stored in the database
-- Decryption is streamed — files are never fully decrypted on disk
-- Master key is stored in the database (zero-knowledge mode planned for future)
-
-## Getting Started
-
-### Prerequisites
-- .NET 10 SDK
-- PostgreSQL
-
-### Run Locally
 ```bash
-# Update connection string in Api/appsettings.json
-# Then:
-cd Api
-dotnet ef migrations add InitialCreate
-dotnet run
-```
-
-### FTP Access
-Connect with any FTP client:
-- **Host**: localhost
-- **Port**: 2121
-- **Username**: your email
-- **Password**: your password
-- Directory structure: `/{DataSourceName}/files...`
-
-### Docker
-```bash
+# Docker
 docker build -t encrypted-file-server .
 docker run -p 5000:5000 -p 2121:2121 \
   -e DATABASE_URL="postgres://user:pass@host:5432/dbname" \
   -e Jwt__Key="your-secret-key-min-32-chars-long" \
-  -v efserver-storage:/app/storage \
   encrypted-file-server
+
+# Local
+dotnet run --project Api
 ```
+
+## Stack
+
+.NET 10 · Blazor WASM · PostgreSQL · FluentFTP · FubarDev.FtpServer · Havit Blazor
