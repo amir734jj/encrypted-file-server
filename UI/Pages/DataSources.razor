@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject IHxMessengerService Messenger
 @inject IHxMessageBoxService MessageBox
+@inject IJSRuntime Js
 
 @if (!Auth.IsAuthenticated)
 {
@@ -89,7 +90,11 @@ else
                     <input class="form-check-input" type="radio" name="encryptionMethod"
                            id="enc-@method" value="@method" checked="@(_encryptionMethod == method)"
                            @onchange="() => _encryptionMethod = method" />
-                    <label class="form-check-label" for="enc-@method">@method</label>
+                    <label class="form-check-label" for="enc-@method">
+                        @method
+                        <i class="bi bi-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-html="true"
+                           title="@GetEncryptionTooltip(method)"></i>
+                    </label>
                 </div>
             }
         </div>
@@ -229,6 +234,7 @@ else
         _sftpAnon = false;
         _encryptionMethod = EncryptionMethod.AesCtr256;
         await _modal.ShowAsync();
+        await InitTooltipsAsync();
     }
 
     private async Task ShowEditModal(DataSourceDto ds)
@@ -254,6 +260,7 @@ else
         _sftpAnon = sftpFrontend?.AllowAnonymous ?? false;
         _encryptionMethod = ds.Backend.EncryptionMethod;
         await _modal.ShowAsync();
+        await InitTooltipsAsync();
     }
 
     private bool IsFormValid() =>
@@ -336,4 +343,32 @@ else
     {
         Nav.NavigateTo($"/files/{id}");
     }
+
+    private async Task InitTooltipsAsync()
+    {
+        await Task.Yield();
+        await Js.InvokeVoidAsync("eval",
+            "document.querySelectorAll('[data-bs-toggle=tooltip]').forEach(el => bootstrap.Tooltip.getOrCreateInstance(el))");
+    }
+
+    private static string GetEncryptionTooltip(EncryptionMethod method) => method switch
+    {
+        EncryptionMethod.None =>
+            "No encryption. Files stored as-is.\n" +
+            "Pros: Fastest performance, no key management.\n" +
+            "Cons: No confidentiality — anyone with backend access can read files.",
+        EncryptionMethod.AesCtr256 =>
+            "AES-256 in Counter mode. Stream cipher with random IV per file.\n" +
+            "Pros: Fast, parallelizable, supports random access / streaming.\n" +
+            "Cons: No built-in authentication — tampering is not detected.",
+        EncryptionMethod.AesGcm256 =>
+            "AES-256 in Galois/Counter mode. Authenticated encryption.\n" +
+            "Pros: Confidentiality + integrity in one pass, hardware-accelerated (AES-NI).\n" +
+            "Cons: 64 KB max per chunk for auth tag, slightly more overhead than CTR.",
+        EncryptionMethod.ChaCha20Poly1305 =>
+            "ChaCha20 stream cipher with Poly1305 MAC. Authenticated encryption.\n" +
+            "Pros: Constant-time, no AES-NI needed, strong on ARM/mobile/older CPUs.\n" +
+            "Cons: Slightly slower than AES-GCM on hardware with AES-NI.",
+        _ => string.Empty
+    };
 }
