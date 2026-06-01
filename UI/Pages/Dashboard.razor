@@ -53,12 +53,12 @@ else
         </div>
         <div class="card-body">
             <ol>
-                <li>Create a <strong>Data Source</strong> — configure a backend FTP server, encryption method, and master password</li>
+                <li>Create a <strong>Data Source</strong> — configure a backend FTP/SFTP server, encryption method, and master password</li>
                 <li>Enable frontends on the data source: <strong>HTTP</strong>, <strong>FTP</strong>, and/or <strong>SFTP</strong></li>
                 <li>Upload files via the <a href="/datasources">web UI file explorer</a> or connect with an FTP/SFTP client</li>
                 <li>Create an <a href="/tickets">Access Ticket</a> for FTP/SFTP/HTTP Basic auth (random username + password)</li>
-                <li>FTP: <code>ftp://server-host:2121</code> &nbsp;|&nbsp; SFTP: <code>sftp://server-host:2222</code></li>
-                <li>HTTP browse: <code>https://server-host/browse</code> (uses ticket credentials via Basic auth)</li>
+                <li>FTP: <code>ftp://fs.coolify.hesamian.com:2121</code> &nbsp;|&nbsp; SFTP: <code>sftp://fs.coolify.hesamian.com:2222</code></li>
+                <li>HTTP browse: <code>https://fs.coolify.hesamian.com/browse</code> (uses ticket credentials via Basic auth)</li>
                 <li>Files are encrypted at rest with your chosen algorithm (AES-CTR-256 default, AES-GCM-256, ChaCha20)</li>
                 <li>Downloads are <strong>streamed and decrypted on-the-fly</strong> — no temp files on disk</li>
             </ol>
