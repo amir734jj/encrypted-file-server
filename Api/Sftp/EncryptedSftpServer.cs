@@ -1,8 +1,7 @@
-using Api.Data;
 using Api.Data.Entities;
+using EfCoreRepository.Interfaces;
 using FxSsh;
 using FxSsh.Services;
-using Microsoft.EntityFrameworkCore;
 using Shared.Models;
 
 namespace Api.Sftp;
@@ -92,26 +91,27 @@ public sealed class EncryptedSftpServer : IDisposable
     private (bool accepted, Guid? userId) ValidateCredentials(string username, string password)
     {
         using var scope = _scopeFactory.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var repository = scope.ServiceProvider.GetRequiredService<IEfRepository>();
 
         if (string.Equals(username, "anonymous", StringComparison.OrdinalIgnoreCase))
         {
-            var hasAnon = db.DataSources
-                .Include(d => d.Frontends)
-                .Any(d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous));
+            var hasAnon = repository.For<DataSource>()
+                .Any(filterExprs: [d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous)])
+                .GetAwaiter().GetResult();
             return (hasAnon, null);
         }
 
-        var ticket = db.AccessTickets
-            .FirstOrDefault(t => t.Username == username
-                && t.Password == password
-                && t.ExpiresAt > DateTimeOffset.UtcNow);
+        var tickets = repository.For<AccessTicket>()
+            .GetAll(
+                filterExprs: [t => t.Username == username && t.Password == password && t.ExpiresAt > DateTimeOffset.UtcNow],
+                project: t => t,
+                maxResults: 1)
+            .GetAwaiter().GetResult().ToList();
 
-        if (ticket is null)
+        if (tickets.Count == 0)
             return (false, null);
 
-        return (true, ticket.UserId);
+        return (true, tickets.First().UserId);
     }
 
     private static string LoadOrGenerateHostKey()

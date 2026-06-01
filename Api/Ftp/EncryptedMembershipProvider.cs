@@ -1,7 +1,6 @@
-using Api.Data;
 using Api.Data.Entities;
+using EfCoreRepository.Interfaces;
 using FubarDev.FtpServer.AccountManagement;
-using Microsoft.EntityFrameworkCore;
 using Shared.Models;
 using System.Security.Claims;
 
@@ -12,11 +11,12 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
     public async Task<MemberValidationResult> ValidateUserAsync(string username, string password)
     {
         using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var repository = scope.ServiceProvider.GetRequiredService<IEfRepository>();
 
         if (string.Equals(username, "anonymous", StringComparison.OrdinalIgnoreCase))
         {
-            var hasAnonymous = await db.DataSources.AnyAsync(d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous));
+            var hasAnonymous = await repository.For<DataSource>().Any(
+                filterExprs: [d => d.Frontends.Any(f => f.Type == FrontendType.Ftp && f.AllowAnonymous)]);
             if (!hasAnonymous)
                 return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
 
@@ -27,14 +27,15 @@ public sealed class EncryptedMembershipProvider(IServiceScopeFactory scopeFactor
                 new ClaimsPrincipal(anonIdentity));
         }
 
-        var ticket = await db.AccessTickets
-            .FirstOrDefaultAsync(t => t.Username == username
-                && t.Password == password
-                && t.ExpiresAt > DateTimeOffset.UtcNow);
+        var tickets = (await repository.For<AccessTicket>().GetAll(
+            filterExprs: [t => t.Username == username && t.Password == password && t.ExpiresAt > DateTimeOffset.UtcNow],
+            project: t => t,
+            maxResults: 1)).ToList();
 
-        if (ticket is null)
+        if (tickets.Count == 0)
             return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
 
+        var ticket = tickets.First();
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, ticket.UserId.ToString()),

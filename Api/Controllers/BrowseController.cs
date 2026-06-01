@@ -1,12 +1,10 @@
 using System.Text;
 using System.Web;
-using Api.Data;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Shared.Interfaces;
 using Shared.Models;
 
@@ -17,11 +15,11 @@ namespace Api.Controllers;
 public sealed class BrowseController(
     IEfRepository repository,
     IFileStorageService fileStorage,
-    IEncryptionProviderFactory encryptionFactory,
-    AppDbContext db) : ControllerBase
+    IEncryptionProviderFactory encryptionFactory) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
+    private IBasicCrud<AccessTicket> TicketDal => repository.For<AccessTicket>();
 
     [HttpGet]
     public async Task<IActionResult> ListUsers()
@@ -160,13 +158,15 @@ public sealed class BrowseController(
             var username = colonIdx >= 0 ? decoded[..colonIdx] : decoded;
             var password = colonIdx >= 0 ? decoded[(colonIdx + 1)..] : string.Empty;
 
-            var ticket = await db.AccessTickets
-                .FirstOrDefaultAsync(t => t.Username == username
+            var tickets = (await TicketDal.GetAll(
+                filterExprs: [t => t.Username == username
                     && t.Password == password
                     && t.ExpiresAt > DateTimeOffset.UtcNow
-                    && t.UserId == ds.UserId);
+                    && t.UserId == ds.UserId],
+                project: t => t,
+                maxResults: 1)).ToList();
 
-            if (ticket is not null)
+            if (tickets.Count > 0)
                 return (ds, masterKey, null);
         }
 

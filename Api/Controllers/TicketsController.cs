@@ -1,10 +1,9 @@
 using System.Security.Cryptography;
-using Api.Data;
 using Api.Data.Entities;
 using Api.Extensions;
+using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Shared.Contracts;
 
 namespace Api.Controllers;
@@ -12,18 +11,18 @@ namespace Api.Controllers;
 [ApiController]
 [Route("api/tickets")]
 [Authorize]
-public sealed class TicketsController(AppDbContext db) : ControllerBase
+public sealed class TicketsController(IEfRepository repository) : ControllerBase
 {
+    private IBasicCrud<AccessTicket> TicketDal => repository.For<AccessTicket>();
     private Guid CurrentUserId => User.GetUserId();
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var tickets = await db.AccessTickets
-            .Where(t => t.UserId == CurrentUserId && t.ExpiresAt > DateTimeOffset.UtcNow)
-            .OrderByDescending(t => t.CreatedAt)
-            .Select(t => new AccessTicketDto(t.Id, t.Username, t.CreatedAt, t.ExpiresAt))
-            .ToListAsync();
+        var tickets = (await TicketDal.GetAll(
+            filterExprs: [t => t.UserId == CurrentUserId && t.ExpiresAt > DateTimeOffset.UtcNow],
+            orderBy: t => t.CreatedAt,
+            project: t => new AccessTicketDto(t.Id, t.Username, t.CreatedAt, t.ExpiresAt))).ToList();
 
         return Ok(tickets);
     }
@@ -37,16 +36,13 @@ public sealed class TicketsController(AppDbContext db) : ControllerBase
         var username = GenerateRandomString(12);
         var password = GenerateRandomString(24);
 
-        var ticket = new AccessTicket
+        var ticket = await TicketDal.Save(new AccessTicket
         {
             UserId = CurrentUserId,
             Username = username,
             Password = password,
             ExpiresAt = req.ExpiresAt
-        };
-
-        db.AccessTickets.Add(ticket);
-        await db.SaveChangesAsync();
+        });
 
         return Ok(new AccessTicketCreatedDto(ticket.Id, username, password, ticket.CreatedAt, ticket.ExpiresAt));
     }
@@ -54,14 +50,13 @@ public sealed class TicketsController(AppDbContext db) : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
-        var ticket = await db.AccessTickets
-            .FirstOrDefaultAsync(t => t.Id == id && t.UserId == CurrentUserId);
+        var exists = await TicketDal.Any(
+            filterExprs: [t => t.Id == id && t.UserId == CurrentUserId]);
 
-        if (ticket is null)
+        if (!exists)
             return NotFound();
 
-        db.AccessTickets.Remove(ticket);
-        await db.SaveChangesAsync();
+        await TicketDal.Delete(id);
         return NoContent();
     }
 
