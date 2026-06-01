@@ -194,13 +194,7 @@ foreach (var frontend in frontends)
 }
 
 app.UseBlazorFrameworkFiles();
-app.UseStaticFiles(new StaticFileOptions
-{
-    OnPrepareResponse = ctx =>
-    {
-        ctx.Context.Response.Headers.CacheControl = "public,max-age=3600";
-    }
-});
+app.MapStaticAssets();
 
 if (app.Environment.IsDevelopment())
 {

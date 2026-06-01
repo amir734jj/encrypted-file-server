@@ -14,6 +14,7 @@ RUN apk add --no-cache krb5-libs
 
 COPY --from=build /app/publish .
 COPY --from=build /app/ui-publish/wwwroot ./wwwroot
+COPY --from=build /app/ui-publish/UI.staticwebassets.endpoints.json .
 
 EXPOSE 5000 2121 2222 50000-50100
 
