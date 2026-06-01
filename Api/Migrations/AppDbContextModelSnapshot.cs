@@ -56,7 +56,7 @@ namespace Api.Migrations
                     b.HasIndex("Username")
                         .IsUnique();
 
-                    b.ToTable("AccessTickets");
+                    b.ToTable("AccessTickets", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.Entities.DataSource", b =>
@@ -81,7 +81,7 @@ namespace Api.Migrations
                     b.HasIndex("UserId", "Name")
                         .IsUnique();
 
-                    b.ToTable("DataSources");
+                    b.ToTable("DataSources", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.Entities.EncryptedFile", b =>
@@ -130,7 +130,7 @@ namespace Api.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("EncryptedFiles");
+                    b.ToTable("EncryptedFiles", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.Entities.GlobalConfig", b =>
@@ -154,7 +154,7 @@ namespace Api.Migrations
                     b.HasIndex("Key")
                         .IsUnique();
 
-                    b.ToTable("GlobalConfigs");
+                    b.ToTable("GlobalConfigs", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.Entities.Role", b =>
@@ -394,8 +394,10 @@ namespace Api.Migrations
 
                             b1.Property<string>("EncryptionMethod")
                                 .IsRequired()
+                                .ValueGeneratedOnAdd()
                                 .HasMaxLength(50)
                                 .HasColumnType("character varying(50)")
+                                .HasDefaultValue("AesCtr256")
                                 .HasColumnName("EncryptionMethod");
 
                             b1.Property<string>("Host")
@@ -432,7 +434,7 @@ namespace Api.Migrations
 
                             b1.HasKey("DataSourceId");
 
-                            b1.ToTable("DataSources");
+                            b1.ToTable("DataSources", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("DataSourceId");

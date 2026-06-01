@@ -209,7 +209,7 @@ namespace Api.Migrations
                     BackendPassword = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
                     BackendBasePath = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
                     BackendUseSsl = table.Column<bool>(type: "boolean", nullable: false),
-                    EncryptionMethod = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false, defaultValue: "AesCtr256"),
+                    EncryptionMethod = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     BackendMasterPassword = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false)
                 },
                 constraints: table =>

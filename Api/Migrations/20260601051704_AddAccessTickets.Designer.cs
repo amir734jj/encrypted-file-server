@@ -397,10 +397,8 @@ namespace Api.Migrations
 
                             b1.Property<string>("EncryptionMethod")
                                 .IsRequired()
-                                .ValueGeneratedOnAdd()
                                 .HasMaxLength(50)
                                 .HasColumnType("character varying(50)")
-                                .HasDefaultValue("AesCtr256")
                                 .HasColumnName("EncryptionMethod");
 
                             b1.Property<string>("Host")
