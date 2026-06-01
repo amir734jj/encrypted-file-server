@@ -19,6 +19,7 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
     private readonly IEncryptionProviderFactory _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
     private readonly IBackendStorageProviderFactory _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
+    private readonly HashSet<(Guid dsId, string virtualPath)> _sessionDirs = [];
 
     private bool IsAnonymous => !userId.HasValue;
 
@@ -132,6 +133,18 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 }
             }
 
+            // Include session-tracked empty directories
+            foreach (var (sid, vpath) in _sessionDirs)
+            {
+                if (sid != dsId || !vpath.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase) || vpath == currentPath)
+                    continue;
+                var rel = vpath[currentPath.Length..].TrimEnd('/');
+                if (!rel.Contains('/') && seenFolders.Add(rel))
+                {
+                    results.Add(new VirtualDirectoryEntry(rel, dsId, vpath));
+                }
+            }
+
             return results.OrderBy(e => e is VirtualDirectoryEntry ? 0 : 1)
                 .ThenBy(e => e.Name).ToList();
         }
@@ -202,7 +215,9 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             }
 
             // Allow navigating into any path — empty folders are valid for uploading files into
-            return new VirtualDirectoryEntry(name, dsId, currentPath + name + "/");
+            var emptyPath = currentPath + name + "/";
+            _sessionDirs.Add((dsId, emptyPath));
+            return new VirtualDirectoryEntry(name, dsId, emptyPath);
         }
 
         return null;
@@ -345,6 +360,7 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         if (targetDirectory is VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
         {
             var newPath = (vde.VirtualPath ?? "") + directoryName + "/";
+            _sessionDirs.Add((dsId, newPath));
             return Task.FromResult<IUnixDirectoryEntry>(new VirtualDirectoryEntry(directoryName, dsId, newPath));
         }
 
