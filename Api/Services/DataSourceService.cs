@@ -84,11 +84,13 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             ds.Backend.Host = req.Backend.Host;
             ds.Backend.Port = req.Backend.Port;
             ds.Backend.Username = req.Backend.Username;
-            ds.Backend.Password = req.Backend.Password;
+            if (!string.IsNullOrEmpty(req.Backend.Password))
+                ds.Backend.Password = req.Backend.Password;
             ds.Backend.BasePath = req.Backend.BasePath;
             ds.Backend.UseSsl = req.Backend.UseSsl;
             ds.Backend.EncryptionMethod = req.Backend.EncryptionMethod;
-            ds.Backend.MasterPassword = req.Backend.MasterPassword;
+            if (!string.IsNullOrEmpty(req.Backend.MasterPassword))
+                ds.Backend.MasterPassword = req.Backend.MasterPassword;
 
             // Sync frontends: add new, update existing, remove absent
             var requestedTypes = req.Frontends.Select(f => f.Type).ToHashSet();

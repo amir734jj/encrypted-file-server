@@ -270,7 +270,7 @@ else
 
     private bool IsFormValid() =>
         !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_backendHost)
-        && !string.IsNullOrWhiteSpace(_masterPassword);
+        && (_editId.HasValue || !string.IsNullOrWhiteSpace(_masterPassword));
 
     private void SetProtocol(BackendStorageType protocol)
     {
