@@ -27,7 +27,6 @@ public sealed class DataSourceMapping : IEntityTypeConfiguration<DataSource>
             b.Property(x => x.EncryptionMethod)
                 .HasConversion<string>()
                 .HasMaxLength(50)
-                .HasDefaultValue(EncryptionMethod.AesCtr256)
                 .HasColumnName("EncryptionMethod");
             b.Property(x => x.MasterPassword).HasMaxLength(500).IsRequired().HasColumnName("BackendMasterPassword");
         });

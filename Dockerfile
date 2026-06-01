@@ -1,13 +1,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 WORKDIR /src
 
-COPY EncryptedFileServer.slnx .
-COPY Shared/Shared.csproj Shared/
-COPY Api/Api.csproj Api/
-COPY UI/UI.csproj UI/
+COPY . .
 RUN dotnet restore
 
-COPY . .
 RUN dotnet publish Api/Api.csproj -c Release -o /app/publish
 RUN dotnet publish UI/UI.csproj -c Release -o /app/ui-publish
 
@@ -26,6 +22,6 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 ENV Storage__BasePath=/app/storage
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD curl -f http://localhost:${PORT:-5000}/api/health || exit 1
+    CMD curl -f "http://localhost:$(echo ${ASPNETCORE_URLS:-http://*:${PORT:-5000}} | grep -oE '[0-9]+$')/api/health" || exit 1
 
 ENTRYPOINT ["dotnet", "Api.dll"]
