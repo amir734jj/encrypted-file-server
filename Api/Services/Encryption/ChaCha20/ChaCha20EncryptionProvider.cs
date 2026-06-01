@@ -48,11 +48,31 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
         return Encoding.UTF8.GetString(plaintext);
     }
 
-    private sealed class ChaChaEncryptStream(Stream inner, byte[] key, byte[] baseNonce) : Stream
+    /// <summary>
+    /// Encrypts data in 64 KB AEAD chunks: [4-byte len][16-byte tag][ciphertext].
+    /// All buffers are pre-allocated; zero per-chunk heap allocations.
+    /// Crypto instance is reused across chunks.
+    /// </summary>
+    private sealed class ChaChaEncryptStream : Stream
     {
-        private readonly byte[] _buffer = new byte[ChunkSize];
+        private readonly Stream _inner;
+        private readonly ChaCha20Poly1305 _chacha;
+        private readonly byte[] _baseNonce;
+        private readonly byte[] _plaintextBuf = new byte[ChunkSize];
+        private readonly byte[] _ciphertextBuf = new byte[ChunkSize];
+        private readonly byte[] _tagBuf = new byte[TagSize];
+        private readonly byte[] _nonceBuf = new byte[NonceSize];
+        private readonly byte[] _headerBuf = new byte[4];
         private int _bufferPos;
         private long _chunkIndex;
+        private bool _disposed;
+
+        public ChaChaEncryptStream(Stream inner, byte[] key, byte[] baseNonce)
+        {
+            _inner = inner;
+            _chacha = new ChaCha20Poly1305(key);
+            _baseNonce = baseNonce;
+        }
 
         public override bool CanRead => false;
         public override bool CanWrite => true;
@@ -64,33 +84,50 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             set => throw new NotSupportedException();
         }
 
-        private byte[] DeriveChunkNonce()
+        private void DeriveChunkNonce()
         {
-            var nonce = new byte[NonceSize];
-            Buffer.BlockCopy(baseNonce, 0, nonce, 0, NonceSize);
-            var counter = BitConverter.GetBytes(_chunkIndex);
+            Buffer.BlockCopy(_baseNonce, 0, _nonceBuf, 0, NonceSize);
+            Span<byte> counter = stackalloc byte[8];
+            BinaryPrimitives.WriteInt64LittleEndian(counter, _chunkIndex);
             for (var i = 0; i < Math.Min(counter.Length, NonceSize); i++)
-                nonce[NonceSize - 1 - i] ^= counter[i];
-            return nonce;
+                _nonceBuf[NonceSize - 1 - i] ^= counter[i];
         }
 
-        private void FlushChunk(bool isFinal)
+        private void EncryptAndWriteChunk()
         {
-            if (_bufferPos == 0 && !isFinal) return;
+            if (_bufferPos == 0) return;
 
-            var plaintext = _buffer.AsSpan(0, _bufferPos);
-            var ciphertext = new byte[_bufferPos];
-            var tag = new byte[TagSize];
-            var nonce = DeriveChunkNonce();
+            DeriveChunkNonce();
+            _chacha.Encrypt(
+                _nonceBuf,
+                _plaintextBuf.AsSpan(0, _bufferPos),
+                _ciphertextBuf.AsSpan(0, _bufferPos),
+                _tagBuf);
 
-            using var chacha = new ChaCha20Poly1305(key);
-            chacha.Encrypt(nonce, plaintext, ciphertext, tag);
+            BinaryPrimitives.WriteInt32LittleEndian(_headerBuf, _bufferPos);
+            _inner.Write(_headerBuf, 0, 4);
+            _inner.Write(_tagBuf, 0, TagSize);
+            _inner.Write(_ciphertextBuf, 0, _bufferPos);
 
-            Span<byte> header = stackalloc byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(header, _bufferPos);
-            inner.Write(header);
-            inner.Write(tag);
-            inner.Write(ciphertext);
+            _bufferPos = 0;
+            _chunkIndex++;
+        }
+
+        private async ValueTask EncryptAndWriteChunkAsync(CancellationToken ct)
+        {
+            if (_bufferPos == 0) return;
+
+            DeriveChunkNonce();
+            _chacha.Encrypt(
+                _nonceBuf,
+                _plaintextBuf.AsSpan(0, _bufferPos),
+                _ciphertextBuf.AsSpan(0, _bufferPos),
+                _tagBuf);
+
+            BinaryPrimitives.WriteInt32LittleEndian(_headerBuf, _bufferPos);
+            await _inner.WriteAsync(_headerBuf.AsMemory(0, 4), ct);
+            await _inner.WriteAsync(_tagBuf.AsMemory(0, TagSize), ct);
+            await _inner.WriteAsync(_ciphertextBuf.AsMemory(0, _bufferPos), ct);
 
             _bufferPos = 0;
             _chunkIndex++;
@@ -102,37 +139,96 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             while (pos < count)
             {
                 var toCopy = Math.Min(count - pos, ChunkSize - _bufferPos);
-                Buffer.BlockCopy(buffer, offset + pos, _buffer, _bufferPos, toCopy);
+                Buffer.BlockCopy(buffer, offset + pos, _plaintextBuf, _bufferPos, toCopy);
                 _bufferPos += toCopy;
                 pos += toCopy;
-                if (_bufferPos >= ChunkSize) FlushChunk(false);
+                if (_bufferPos >= ChunkSize) EncryptAndWriteChunk();
+            }
+        }
+
+        public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+        {
+            var pos = 0;
+            while (pos < count)
+            {
+                var toCopy = Math.Min(count - pos, ChunkSize - _bufferPos);
+                Buffer.BlockCopy(buffer, offset + pos, _plaintextBuf, _bufferPos, toCopy);
+                _bufferPos += toCopy;
+                pos += toCopy;
+                if (_bufferPos >= ChunkSize) await EncryptAndWriteChunkAsync(ct);
+            }
+        }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            var pos = 0;
+            while (pos < buffer.Length)
+            {
+                var toCopy = Math.Min(buffer.Length - pos, ChunkSize - _bufferPos);
+                buffer.Span.Slice(pos, toCopy).CopyTo(_plaintextBuf.AsSpan(_bufferPos));
+                _bufferPos += toCopy;
+                pos += toCopy;
+                if (_bufferPos >= ChunkSize) await EncryptAndWriteChunkAsync(ct);
             }
         }
 
         public override void Flush() { }
-
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (disposing && !_disposed)
             {
-                FlushChunk(true);
-                inner.Flush();
+                _disposed = true;
+                EncryptAndWriteChunk();
+                _inner.Flush();
+                _chacha.Dispose();
             }
             base.Dispose(disposing);
         }
+
+        public override async ValueTask DisposeAsync()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                await EncryptAndWriteChunkAsync(CancellationToken.None);
+                await _inner.FlushAsync();
+                _chacha.Dispose();
+            }
+            GC.SuppressFinalize(this);
+        }
     }
 
-    private sealed class ChaChaDecryptStream(Stream inner, byte[] key, byte[] baseNonce) : Stream
+    /// <summary>
+    /// Reads and decrypts chunked AEAD data. All buffers are pre-allocated (2 × 64 KB).
+    /// Validates chunk length headers to prevent memory bombs.
+    /// Supports both sync and async I/O on the underlying stream.
+    /// </summary>
+    private sealed class ChaChaDecryptStream : Stream
     {
-        private byte[]? _decryptedChunk;
+        private readonly Stream _inner;
+        private readonly ChaCha20Poly1305 _chacha;
+        private readonly byte[] _baseNonce;
+        private readonly byte[] _headerBuf = new byte[4];
+        private readonly byte[] _tagBuf = new byte[TagSize];
+        private readonly byte[] _ciphertextBuf = new byte[ChunkSize];
+        private readonly byte[] _decryptedBuf = new byte[ChunkSize];
+        private readonly byte[] _nonceBuf = new byte[NonceSize];
         private int _chunkPos;
         private int _chunkLen;
         private long _chunkIndex;
         private bool _eof;
+        private bool _disposed;
+
+        public ChaChaDecryptStream(Stream inner, byte[] key, byte[] baseNonce)
+        {
+            _inner = inner;
+            _chacha = new ChaCha20Poly1305(key);
+            _baseNonce = baseNonce;
+        }
 
         public override bool CanRead => true;
         public override bool CanWrite => false;
@@ -144,32 +240,55 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             set => throw new NotSupportedException();
         }
 
-        private byte[] DeriveChunkNonce()
+        private void DeriveChunkNonce()
         {
-            var nonce = new byte[NonceSize];
-            Buffer.BlockCopy(baseNonce, 0, nonce, 0, NonceSize);
-            var counter = BitConverter.GetBytes(_chunkIndex);
+            Buffer.BlockCopy(_baseNonce, 0, _nonceBuf, 0, NonceSize);
+            Span<byte> counter = stackalloc byte[8];
+            BinaryPrimitives.WriteInt64LittleEndian(counter, _chunkIndex);
             for (var i = 0; i < Math.Min(counter.Length, NonceSize); i++)
-                nonce[NonceSize - 1 - i] ^= counter[i];
-            return nonce;
+                _nonceBuf[NonceSize - 1 - i] ^= counter[i];
         }
 
         private bool ReadNextChunk()
         {
-            var headerBuf = new byte[4];
-            if (ReadExact(inner, headerBuf, 4) < 4) { _eof = true; return false; }
-            var plainLen = BinaryPrimitives.ReadInt32LittleEndian(headerBuf);
+            if (ReadExact(_inner, _headerBuf, 4) < 4) { _eof = true; return false; }
+            var plainLen = BinaryPrimitives.ReadInt32LittleEndian(_headerBuf);
 
-            var tag = new byte[TagSize];
-            if (ReadExact(inner, tag, TagSize) < TagSize) { _eof = true; return false; }
+            if (plainLen <= 0 || plainLen > ChunkSize)
+                throw new InvalidDataException($"Invalid chunk length {plainLen}; max allowed is {ChunkSize}.");
 
-            var ciphertext = new byte[plainLen];
-            if (ReadExact(inner, ciphertext, plainLen) < plainLen) { _eof = true; return false; }
+            if (ReadExact(_inner, _tagBuf, TagSize) < TagSize) { _eof = true; return false; }
+            if (ReadExact(_inner, _ciphertextBuf, plainLen) < plainLen) { _eof = true; return false; }
 
-            _decryptedChunk = new byte[plainLen];
-            var nonce = DeriveChunkNonce();
-            using var chacha = new ChaCha20Poly1305(key);
-            chacha.Decrypt(nonce, ciphertext, tag, _decryptedChunk);
+            DeriveChunkNonce();
+            _chacha.Decrypt(
+                _nonceBuf,
+                _ciphertextBuf.AsSpan(0, plainLen),
+                _tagBuf,
+                _decryptedBuf.AsSpan(0, plainLen));
+            _chunkPos = 0;
+            _chunkLen = plainLen;
+            _chunkIndex++;
+            return true;
+        }
+
+        private async Task<bool> ReadNextChunkAsync(CancellationToken ct)
+        {
+            if (await ReadExactAsync(_inner, _headerBuf, 4, ct) < 4) { _eof = true; return false; }
+            var plainLen = BinaryPrimitives.ReadInt32LittleEndian(_headerBuf);
+
+            if (plainLen <= 0 || plainLen > ChunkSize)
+                throw new InvalidDataException($"Invalid chunk length {plainLen}; max allowed is {ChunkSize}.");
+
+            if (await ReadExactAsync(_inner, _tagBuf, TagSize, ct) < TagSize) { _eof = true; return false; }
+            if (await ReadExactAsync(_inner, _ciphertextBuf, plainLen, ct) < plainLen) { _eof = true; return false; }
+
+            DeriveChunkNonce();
+            _chacha.Decrypt(
+                _nonceBuf,
+                _ciphertextBuf.AsSpan(0, plainLen),
+                _tagBuf,
+                _decryptedBuf.AsSpan(0, plainLen));
             _chunkPos = 0;
             _chunkLen = plainLen;
             _chunkIndex++;
@@ -188,19 +307,69 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
             return totalRead;
         }
 
+        private static async Task<int> ReadExactAsync(Stream s, byte[] buffer, int count, CancellationToken ct)
+        {
+            var totalRead = 0;
+            while (totalRead < count)
+            {
+                var read = await s.ReadAsync(buffer.AsMemory(totalRead, count - totalRead), ct);
+                if (read == 0) return totalRead;
+                totalRead += read;
+            }
+            return totalRead;
+        }
+
         public override int Read(byte[] buffer, int offset, int count)
         {
             var totalRead = 0;
             while (totalRead < count)
             {
-                if (_decryptedChunk is null || _chunkPos >= _chunkLen)
+                if (_chunkPos >= _chunkLen)
                 {
                     if (_eof || !ReadNextChunk()) break;
                 }
 
                 var available = _chunkLen - _chunkPos;
                 var toCopy = Math.Min(available, count - totalRead);
-                Buffer.BlockCopy(_decryptedChunk!, _chunkPos, buffer, offset + totalRead, toCopy);
+                Buffer.BlockCopy(_decryptedBuf, _chunkPos, buffer, offset + totalRead, toCopy);
+                _chunkPos += toCopy;
+                totalRead += toCopy;
+            }
+            return totalRead;
+        }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+        {
+            var totalRead = 0;
+            while (totalRead < count)
+            {
+                if (_chunkPos >= _chunkLen)
+                {
+                    if (_eof || !await ReadNextChunkAsync(ct)) break;
+                }
+
+                var available = _chunkLen - _chunkPos;
+                var toCopy = Math.Min(available, count - totalRead);
+                Buffer.BlockCopy(_decryptedBuf, _chunkPos, buffer, offset + totalRead, toCopy);
+                _chunkPos += toCopy;
+                totalRead += toCopy;
+            }
+            return totalRead;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            var totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                if (_chunkPos >= _chunkLen)
+                {
+                    if (_eof || !await ReadNextChunkAsync(ct)) break;
+                }
+
+                var available = _chunkLen - _chunkPos;
+                var toCopy = Math.Min(available, buffer.Length - totalRead);
+                _decryptedBuf.AsSpan(_chunkPos, toCopy).CopyTo(buffer.Span[totalRead..]);
                 _chunkPos += toCopy;
                 totalRead += toCopy;
             }
@@ -214,8 +383,24 @@ public sealed class ChaCha20EncryptionProvider : IEncryptionProvider
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) inner.Dispose();
+            if (disposing && !_disposed)
+            {
+                _disposed = true;
+                _chacha.Dispose();
+                _inner.Dispose();
+            }
             base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                _chacha.Dispose();
+                await _inner.DisposeAsync();
+            }
+            GC.SuppressFinalize(this);
         }
     }
 }

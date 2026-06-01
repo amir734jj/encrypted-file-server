@@ -52,6 +52,7 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
     var portConfig = builder.Configuration.GetValue<string>("PORT");
     var port = !string.IsNullOrEmpty(portConfig) && int.TryParse(portConfig, out var p) ? p : 5000;
     serverOptions.ListenAnyIP(port);
+    serverOptions.Limits.MaxRequestBodySize = null; // per-endpoint limits via [RequestSizeLimit]
 });
 
 var connectionString = ConnectionStringUtility.ConnectionStringUrlToPgResource(
