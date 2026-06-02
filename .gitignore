@@ -19,6 +19,9 @@ x86/
 # Rider
 .idea/
 
+# Secrets / environment-specific
+**/appsettings.Development.json
+
 # Storage
 storage/
 logs/

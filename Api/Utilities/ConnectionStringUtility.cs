@@ -25,7 +25,7 @@ public static class ConnectionStringUtility
             Password = table["Password"],
             Database = table["Database"],
             ApplicationName = table["ApplicationName"],
-            SslMode = SslMode.Prefer,
+            SslMode = SslMode.Disable,
             Pooling = true,
             MaxPoolSize = 20,
             Port = port,
