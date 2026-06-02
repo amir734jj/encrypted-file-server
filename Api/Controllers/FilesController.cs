@@ -119,19 +119,40 @@ public sealed class FilesController(
         path = NormalizePath(path);
         var fullPath = path + file.FileName;
 
+        // Delete existing file with the same name (replace semantics)
+        var ds = (await GetDataSource(dataSourceId))!;
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+        var defaultMethod = ds.Backend.EncryptionMethod;
+        var existingFiles = (await FileDal.GetAll(
+            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
+            project: f => f)).ToList();
+        foreach (var ef in existingFiles)
+        {
+            try
+            {
+                var enc = encryptionFactory.GetProvider(ef.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(ef.IvBase64);
+                var decryptedName = enc.DecryptString(ef.OriginalFileName, masterKey, iv);
+                if (string.Equals(decryptedName, fullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    await fileStorage.DeleteFileAsync(ef);
+                    break;
+                }
+            }
+            catch { /* skip corrupt entries */ }
+        }
+
         await using var stream = file.OpenReadStream();
         var entity = await fileStorage.StoreFileAsync(
             CurrentUserId, dataSourceId, fullPath, file.ContentType, stream);
 
-        var ds = (await GetDataSource(dataSourceId))!;
         var encryption = encryptionFactory.GetProvider(entity.EncryptionMethod ?? ds.Backend.EncryptionMethod);
-        var iv = Convert.FromBase64String(entity.IvBase64);
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+        var entityIv = Convert.FromBase64String(entity.IvBase64);
 
         return Ok(new FileEntryDto(
             entity.Id, entity.DataSourceId,
-            encryption.DecryptString(entity.OriginalFileName, masterKey, iv),
-            entity.ContentType is not null ? encryption.DecryptString(entity.ContentType, masterKey, iv) : null,
+            encryption.DecryptString(entity.OriginalFileName, masterKey, entityIv),
+            entity.ContentType is not null ? encryption.DecryptString(entity.ContentType, masterKey, entityIv) : null,
             entity.OriginalFileSize, entity.CreatedAt, entity.UpdatedAt));
     }
 
@@ -327,7 +348,24 @@ public sealed class FilesController(
             return string.Empty;
         }
 
-        path = path.Replace('\\', '/').Trim('/');
-        return path.Length > 0 ? path + "/" : string.Empty;
+        path = path.Replace('\\', '/');
+
+        // Resolve ".." and "." segments to prevent path traversal
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var stack = new Stack<string>();
+        foreach (var seg in segments)
+        {
+            if (seg == "..")
+            {
+                if (stack.Count > 0) stack.Pop();
+            }
+            else if (seg != ".")
+            {
+                stack.Push(seg);
+            }
+        }
+
+        var resolved = string.Join("/", stack.Reverse());
+        return resolved.Length > 0 ? resolved + "/" : string.Empty;
     }
 }
