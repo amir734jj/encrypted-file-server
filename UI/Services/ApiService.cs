@@ -2,6 +2,8 @@ using Refit;
 using Shared.Contracts;
 using Shared.Contracts.Interfaces;
 using Shared.Models;
+using System.Net;
+using Newtonsoft.Json;
 
 namespace UI.Services;
 
@@ -114,6 +116,29 @@ public sealed class ApiService(
 
     // Remote import
     public Task<RemoteBrowseResponse> BrowseRemoteAsync(RemoteBrowseRequest req) => remoteImportApi.BrowseAsync(req);
-    public Task<RemoteImportResult> ImportRemoteAsync(Guid dataSourceId, RemoteImportRequest req) => remoteImportApi.ImportAsync(dataSourceId, req);
-    public Task<BulkOperationProgress?> GetImportProgressAsync(Guid dataSourceId) => remoteImportApi.GetImportProgressAsync(dataSourceId);
+    public Task StartImportRemoteAsync(Guid dataSourceId, RemoteImportRequest req) => remoteImportApi.ImportAsync(dataSourceId, req);
+
+    /// <summary>
+    /// Polls the import progress endpoint. Returns either a BulkOperationProgress (still running)
+    /// or a RemoteImportResult (completed), or null (no import running).
+    /// </summary>
+    public async Task<(BulkOperationProgress? Progress, RemoteImportResult? Result)> GetImportStatusAsync(Guid dataSourceId)
+    {
+        using var response = await remoteImportApi.GetImportProgressRawAsync(dataSourceId);
+        if (response.StatusCode == HttpStatusCode.NoContent || response.Content is null)
+            return (null, null);
+
+        var json = response.Content;
+
+        // If it has "Imported" field, it's a completed result; otherwise it's progress
+        if (json.Contains("\"imported\"", StringComparison.OrdinalIgnoreCase) ||
+            json.Contains("\"failed\"", StringComparison.OrdinalIgnoreCase))
+        {
+            var result = JsonConvert.DeserializeObject<RemoteImportResult>(json);
+            return (null, result);
+        }
+
+        var progress = JsonConvert.DeserializeObject<BulkOperationProgress>(json);
+        return (progress, null);
+    }
 }

@@ -356,7 +356,6 @@
 
     private async Task ImportSelected()
     {
-        // For selected files, we import them one by one from their current paths
         _importing = true;
         _importResult = null;
         _importProgress = new BulkOperationProgress("Import", _selectedFiles.Count, 0);
@@ -370,18 +369,25 @@
         {
             try
             {
-                // Import single file: use the file's directory as remote path, and target accordingly
-                var fileName = Path.GetFileName(filePath);
-                var targetFile = string.IsNullOrEmpty(_targetPath)
-                    ? fileName
-                    : _targetPath.TrimEnd('/') + "/" + fileName;
-
-                // Use the import endpoint with a single-file remote path
-                await Api.ImportRemoteAsync(DataSourceId, new RemoteImportRequest(
+                await Api.StartImportRemoteAsync(DataSourceId, new RemoteImportRequest(
                     BuildConnection(),
                     filePath,
                     string.IsNullOrEmpty(_targetPath) ? "" : _targetPath));
-                imported++;
+
+                // Poll until this single-file import completes
+                while (true)
+                {
+                    await Task.Delay(500);
+                    var (progress, result) = await Api.GetImportStatusAsync(DataSourceId);
+                    if (result is not null)
+                    {
+                        imported += result.Imported;
+                        failed += result.Failed;
+                        errors.AddRange(result.Errors);
+                        break;
+                    }
+                    if (progress is null) break; // no longer running
+                }
             }
             catch (Exception ex)
             {
@@ -405,16 +411,34 @@
         _importProgress = new BulkOperationProgress("Import", 0, 0);
         StateHasChanged();
 
-        // Start polling progress
-        var cts = new CancellationTokenSource();
-        var pollTask = PollProgressAsync(cts.Token);
-
         try
         {
-            _importResult = await Api.ImportRemoteAsync(DataSourceId, new RemoteImportRequest(
+            await Api.StartImportRemoteAsync(DataSourceId, new RemoteImportRequest(
                 BuildConnection(),
                 _currentPath,
                 _targetPath));
+
+            // Poll until the background import completes
+            while (true)
+            {
+                await Task.Delay(1000);
+                var (progress, result) = await Api.GetImportStatusAsync(DataSourceId);
+                if (result is not null)
+                {
+                    _importResult = result;
+                    break;
+                }
+                if (progress is not null)
+                {
+                    _importProgress = progress;
+                    StateHasChanged();
+                }
+                else
+                {
+                    // Neither progress nor result — import may have finished between checks
+                    break;
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -422,29 +446,8 @@
         }
         finally
         {
-            cts.Cancel();
-            try { await pollTask; } catch { /* ignore */ }
             _importing = false;
             StateHasChanged();
-        }
-    }
-
-    private async Task PollProgressAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(1000, ct);
-                var progress = await Api.GetImportProgressAsync(DataSourceId);
-                if (progress is not null)
-                {
-                    _importProgress = progress;
-                    await InvokeAsync(StateHasChanged);
-                }
-            }
-            catch (TaskCanceledException) { break; }
-            catch { /* ignore polling errors */ }
         }
     }
 
