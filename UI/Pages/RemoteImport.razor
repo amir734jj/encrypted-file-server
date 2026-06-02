@@ -1,0 +1,458 @@
+@page "/import/{DataSourceId:guid}"
+@using Shared.Contracts
+@using Shared.Models
+@inject ApiService Api
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IHxMessengerService Messenger
+
+@if (!Auth.IsAuthenticated)
+{
+    Nav.NavigateTo("/login");
+    return;
+}
+
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/datasources">Data Sources</a></li>
+        <li class="breadcrumb-item active">Import from Remote</li>
+    </ol>
+</nav>
+
+<h3 class="mb-4"><i class="bi bi-cloud-download me-2"></i>Import from Remote FTP/SFTP</h3>
+
+@* ── Connection Form ── *@
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-plug me-2"></i>Remote Connection</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Protocol</label>
+                <select class="form-select" @bind="_protocol">
+                    <option value="@BackendStorageType.FtpClient">FTP</option>
+                    <option value="@BackendStorageType.SftpClient">SFTP</option>
+                </select>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Host</label>
+                <input class="form-control" @bind="_host" placeholder="ftp.example.com" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Port</label>
+                <input type="number" class="form-control" @bind="_port" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">SSL</label>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" @bind="_useSsl" id="sslCheck" />
+                    <label class="form-check-label" for="sslCheck">Use SSL</label>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Username</label>
+                <input class="form-control" @bind="_username" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Password</label>
+                <input type="password" class="form-control" @bind="_password" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Base Path</label>
+                <input class="form-control" @bind="_basePath" placeholder="/" />
+            </div>
+        </div>
+        <div class="mt-3">
+            <button class="btn btn-outline-primary" @onclick="ConnectAndBrowse" disabled="@(_browsing || _importing)">
+                @if (_browsing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                }
+                <i class="bi bi-link-45deg me-1"></i> Connect & Browse
+            </button>
+        </div>
+    </div>
+</div>
+
+@* ── Browse Results ── *@
+@if (_browseError is not null)
+{
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle me-2"></i>@_browseError
+    </div>
+}
+
+@if (_browseResult is not null)
+{
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-folder2-open me-2"></i>Remote Files: @_currentPath</span>
+            <div class="d-flex gap-2">
+                @if (_selectedFiles.Count > 0)
+                {
+                    <span class="badge bg-primary align-self-center">@_selectedFiles.Count selected</span>
+                }
+            </div>
+        </div>
+        <div class="card-body p-0">
+            @* Breadcrumb navigation *@
+            <div class="px-3 pt-2 pb-1">
+                <nav aria-label="remote path">
+                    <ol class="breadcrumb mb-0 small">
+                        <li class="breadcrumb-item">
+                            <a href="#" @onclick="@(() => NavigateRemote("/"))" @onclick:preventDefault>Root</a>
+                        </li>
+                        @{
+                            var pathParts = _currentPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                        }
+                        @for (var i = 0; i < pathParts.Length; i++)
+                        {
+                            var partPath = "/" + string.Join("/", pathParts.Take(i + 1));
+                            if (i == pathParts.Length - 1)
+                            {
+                                <li class="breadcrumb-item active">@pathParts[i]</li>
+                            }
+                            else
+                            {
+                                var p = partPath;
+                                <li class="breadcrumb-item">
+                                    <a href="#" @onclick="() => NavigateRemote(p)" @onclick:preventDefault>@pathParts[i]</a>
+                                </li>
+                            }
+                        }
+                    </ol>
+                </nav>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">
+                                <input type="checkbox" class="form-check-input"
+                                       checked="@(_selectedFiles.Count == _browseResult.Entries.Count(e => !e.IsDirectory))"
+                                       @onchange="ToggleSelectAll" />
+                            </th>
+                            <th>Name</th>
+                            <th style="width:120px" class="text-end">Size</th>
+                            <th style="width:160px">Modified</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in _browseResult.Entries)
+                        {
+                            <tr>
+                                <td>
+                                    @if (!entry.IsDirectory)
+                                    {
+                                        <input type="checkbox" class="form-check-input"
+                                               checked="@_selectedFiles.Contains(entry.FullPath)"
+                                               @onchange="() => ToggleFile(entry.FullPath)" />
+                                    }
+                                </td>
+                                <td>
+                                    @if (entry.IsDirectory)
+                                    {
+                                        <a href="#" @onclick="() => NavigateRemote(entry.FullPath)" @onclick:preventDefault>
+                                            <i class="bi bi-folder-fill text-warning me-2"></i>@entry.Name
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-file-earmark me-2 text-muted"></i>@entry.Name
+                                    }
+                                </td>
+                                <td class="text-end text-muted">
+                                    @if (!entry.IsDirectory)
+                                    {
+                                        @FormatBytes(entry.Size)
+                                    }
+                                </td>
+                                <td class="text-muted small">
+                                    @entry.Modified?.ToString("yyyy-MM-dd HH:mm")
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    @* ── Import Controls ── *@
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-box-arrow-in-down me-2"></i>Import Options</div>
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label">Target Folder (in data source)</label>
+                    <input class="form-control" @bind="_targetPath" placeholder="Leave empty for root" />
+                </div>
+                <div class="col-md-6">
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-success" @onclick="ImportSelected"
+                                disabled="@(_importing || _selectedFiles.Count == 0)">
+                            @if (_importing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            <i class="bi bi-download me-1"></i> Import Selected (@_selectedFiles.Count files)
+                        </button>
+                        <button class="btn btn-primary" @onclick="ImportAll"
+                                disabled="@(_importing)">
+                            @if (_importing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            <i class="bi bi-cloud-download me-1"></i> Import Entire Folder
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Progress ── *@
+@if (_importing && _importProgress is not null)
+{
+    <div class="alert alert-info">
+        <div class="d-flex align-items-center mb-2">
+            <div class="spinner-border spinner-border-sm me-2"></div>
+            <strong>Importing... @_importProgress.Processed / @_importProgress.TotalFiles files</strong>
+        </div>
+        <div class="progress">
+            @{
+                var pct = _importProgress.TotalFiles > 0
+                    ? (int)((double)_importProgress.Processed / _importProgress.TotalFiles * 100) : 0;
+            }
+            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                 style="width: @(pct)%">@(pct)%</div>
+        </div>
+    </div>
+}
+
+@if (_importResult is not null)
+{
+    <div class="alert @(_importResult.Failed > 0 ? "alert-warning" : "alert-success")">
+        <h5>Import Complete</h5>
+        <p>
+            <strong>@_importResult.Imported</strong> of <strong>@_importResult.TotalFiles</strong> files imported.
+            @if (_importResult.Failed > 0)
+            {
+                <span class="text-danger"><strong>@_importResult.Failed</strong> failed.</span>
+            }
+        </p>
+        @if (_importResult.Errors.Count > 0)
+        {
+            <details>
+                <summary>Error details (@_importResult.Errors.Count)</summary>
+                <ul class="small mt-2">
+                    @foreach (var err in _importResult.Errors)
+                    {
+                        <li class="text-danger">@err</li>
+                    }
+                </ul>
+            </details>
+        }
+        <a href="/files/@DataSourceId" class="btn btn-outline-primary btn-sm mt-2">
+            <i class="bi bi-folder2-open me-1"></i> View Files
+        </a>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid DataSourceId { get; set; }
+
+    // Connection fields
+    private BackendStorageType _protocol = BackendStorageType.FtpClient;
+    private string _host = "";
+    private int _port = 21;
+    private string _username = "";
+    private string _password = "";
+    private string _basePath = "/";
+    private bool _useSsl;
+
+    // Browse state
+    private string _currentPath = "/";
+    private bool _browsing;
+    private string? _browseError;
+    private RemoteBrowseResponse? _browseResult;
+    private readonly HashSet<string> _selectedFiles = new();
+
+    // Import state
+    private string _targetPath = "";
+    private bool _importing;
+    private BulkOperationProgress? _importProgress;
+    private RemoteImportResult? _importResult;
+
+    private RemoteConnectionRequest BuildConnection() =>
+        new(_protocol, _host, _port, _username, _password, _basePath, _useSsl);
+
+    private async Task ConnectAndBrowse()
+    {
+        _browseError = null;
+        _browseResult = null;
+        _selectedFiles.Clear();
+        _browsing = true;
+        _importResult = null;
+        StateHasChanged();
+
+        try
+        {
+            _browseResult = await Api.BrowseRemoteAsync(
+                new RemoteBrowseRequest(BuildConnection(), _basePath));
+            _currentPath = _browseResult.Path;
+        }
+        catch (Exception ex)
+        {
+            _browseError = ex.Message;
+        }
+        finally
+        {
+            _browsing = false;
+        }
+    }
+
+    private async Task NavigateRemote(string path)
+    {
+        _browsing = true;
+        _selectedFiles.Clear();
+        StateHasChanged();
+
+        try
+        {
+            _browseResult = await Api.BrowseRemoteAsync(
+                new RemoteBrowseRequest(BuildConnection(), path));
+            _currentPath = _browseResult.Path;
+            _browseError = null;
+        }
+        catch (Exception ex)
+        {
+            _browseError = ex.Message;
+        }
+        finally
+        {
+            _browsing = false;
+        }
+    }
+
+    private void ToggleFile(string path)
+    {
+        if (!_selectedFiles.Remove(path))
+            _selectedFiles.Add(path);
+    }
+
+    private void ToggleSelectAll()
+    {
+        var files = _browseResult?.Entries.Where(e => !e.IsDirectory).Select(e => e.FullPath).ToList() ?? [];
+        if (_selectedFiles.Count == files.Count)
+            _selectedFiles.Clear();
+        else
+        {
+            _selectedFiles.Clear();
+            foreach (var f in files) _selectedFiles.Add(f);
+        }
+    }
+
+    private async Task ImportSelected()
+    {
+        // For selected files, we import them one by one from their current paths
+        _importing = true;
+        _importResult = null;
+        _importProgress = new BulkOperationProgress("Import", _selectedFiles.Count, 0);
+        StateHasChanged();
+
+        var imported = 0;
+        var failed = 0;
+        var errors = new List<string>();
+
+        foreach (var filePath in _selectedFiles)
+        {
+            try
+            {
+                // Import single file: use the file's directory as remote path, and target accordingly
+                var fileName = Path.GetFileName(filePath);
+                var targetFile = string.IsNullOrEmpty(_targetPath)
+                    ? fileName
+                    : _targetPath.TrimEnd('/') + "/" + fileName;
+
+                // Use the import endpoint with a single-file remote path
+                await Api.ImportRemoteAsync(DataSourceId, new RemoteImportRequest(
+                    BuildConnection(),
+                    filePath,
+                    string.IsNullOrEmpty(_targetPath) ? "" : _targetPath));
+                imported++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                if (errors.Count < 50) errors.Add($"{filePath}: {ex.Message}");
+            }
+
+            _importProgress = new BulkOperationProgress("Import", _selectedFiles.Count, imported + failed);
+            StateHasChanged();
+        }
+
+        _importResult = new RemoteImportResult(_selectedFiles.Count, imported, failed, errors);
+        _importing = false;
+        _selectedFiles.Clear();
+    }
+
+    private async Task ImportAll()
+    {
+        _importing = true;
+        _importResult = null;
+        _importProgress = new BulkOperationProgress("Import", 0, 0);
+        StateHasChanged();
+
+        // Start polling progress
+        var cts = new CancellationTokenSource();
+        var pollTask = PollProgressAsync(cts.Token);
+
+        try
+        {
+            _importResult = await Api.ImportRemoteAsync(DataSourceId, new RemoteImportRequest(
+                BuildConnection(),
+                _currentPath,
+                _targetPath));
+        }
+        catch (Exception ex)
+        {
+            _importResult = new RemoteImportResult(0, 0, 1, [ex.Message]);
+        }
+        finally
+        {
+            cts.Cancel();
+            try { await pollTask; } catch { /* ignore */ }
+            _importing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PollProgressAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(1000, ct);
+                var progress = await Api.GetImportProgressAsync(DataSourceId);
+                if (progress is not null)
+                {
+                    _importProgress = progress;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (TaskCanceledException) { break; }
+            catch { /* ignore polling errors */ }
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1048576) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1073741824) return $"{bytes / 1048576.0:F1} MB";
+        return $"{bytes / 1073741824.0:F2} GB";
+    }
+}

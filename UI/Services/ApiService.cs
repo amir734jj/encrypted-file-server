@@ -13,6 +13,7 @@ public sealed class ApiService(
     IFilesApi filesApi,
     IGlobalConfigApi globalConfigApi,
     ITicketsApi ticketsApi,
+    IRemoteImportApi remoteImportApi,
     AuthService auth)
 {
     public async Task<string?> LoginAsync(string email, string password)
@@ -110,4 +111,9 @@ public sealed class ApiService(
     public Task<AccessTicketCreatedDto> CreateTicketAsync(CreateAccessTicketRequest req) => ticketsApi.CreateAsync(req);
     public Task DeleteTicketAsync(Guid id) => ticketsApi.DeleteAsync(id);
     public Task<AccessTicketDto> ExtendTicketAsync(Guid id, ExtendAccessTicketRequest req) => ticketsApi.ExtendAsync(id, req);
+
+    // Remote import
+    public Task<RemoteBrowseResponse> BrowseRemoteAsync(RemoteBrowseRequest req) => remoteImportApi.BrowseAsync(req);
+    public Task<RemoteImportResult> ImportRemoteAsync(Guid dataSourceId, RemoteImportRequest req) => remoteImportApi.ImportAsync(dataSourceId, req);
+    public Task<BulkOperationProgress?> GetImportProgressAsync(Guid dataSourceId) => remoteImportApi.GetImportProgressAsync(dataSourceId);
 }

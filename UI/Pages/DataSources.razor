@@ -122,6 +122,11 @@ else
                                   OnClick="() => DuplicateDataSource(ds)">
                             <i class="bi bi-copy me-1"></i> Duplicate
                         </HxButton>
+                        <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small"
+                                  OnClick="@(() => Nav.NavigateTo("/import/" + ds.Id))"
+                                  Enabled="@(!_progressMap.ContainsKey(ds.Id))">
+                            <i class="bi bi-cloud-download me-1"></i> Import Remote
+                        </HxButton>
                         <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)"
                                   Enabled="@(!_progressMap.ContainsKey(ds.Id))">
                             <i class="bi bi-trash me-1"></i> Delete

@@ -42,7 +42,8 @@ foreach (var apiType in new[]
     typeof(IDataSourcesApi),
     typeof(IFilesApi),
     typeof(IGlobalConfigApi),
-    typeof(ITicketsApi)
+    typeof(ITicketsApi),
+    typeof(IRemoteImportApi)
 })
 {
     builder.Services
