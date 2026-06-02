@@ -71,11 +71,14 @@ else
                                 <i class="bi bi-link-45deg me-1"></i>
                                 <a href="@($"browse/{ds.Id}/")" target="_blank">@($"{Nav.BaseUri}browse/{ds.Id}/")</a>
                             </small>
+                            @if (ds.Backend.EncryptionMethod != EncryptionMethod.None)
+                            {
                             <br />
                             <small class="text-muted">
                                 <i class="bi bi-file-binary me-1"></i>
                                 <a href="@($"raw/{ds.Id}/")" target="_blank">@($"{Nav.BaseUri}raw/{ds.Id}/")</a> <span class="badge bg-danger" style="font-size:0.65em">RAW</span>
                             </small>
+                            }
                         }
                         <br />
                         <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
