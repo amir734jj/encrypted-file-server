@@ -716,13 +716,28 @@ public sealed class SftpSubsystem(
             moved++;
         }
 
-        if (moved == 0)
+        // Update session-tracked dirs
+        var oldSessionDirs = _sessionDirs
+            .Where(e => e.dsId == ds.Id && e.virtualPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var old in oldSessionDirs)
+        {
+            _sessionDirs.Remove(old);
+            _sessionDirs.Add((ds.Id, newPrefix + old.virtualPath[oldPrefix.Length..]));
+        }
+
+        // If no files were moved but the dir exists as a session-tracked empty dir, still succeed
+        if (moved == 0 && oldSessionDirs.Count == 0)
         {
             SendStatus(id, SSH_FX_NO_SUCH_FILE);
             return;
         }
 
-        await _db.SaveChangesAsync();
+        if (moved > 0)
+        {
+            await _db.SaveChangesAsync();
+        }
+
         InvalidateCache();
         SendStatus(id, SSH_FX_OK);
     }

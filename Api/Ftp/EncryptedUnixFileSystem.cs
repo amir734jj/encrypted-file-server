@@ -278,29 +278,15 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
             throw new InvalidOperationException("Cannot create files in the root directory. Use a data source folder.");
         }
 
-        _logger.LogInformation("FTP CreateAsync: dsId={DsId}, userId={UserId}, virtualPath={VPath}, fileName={FName}",
-            dsId, userId, vde.VirtualPath, fileName);
-
         var dsOwned = await DataSourceDal.Any(filterExprs: [d => d.Id == dsId && d.UserId == userId]);
         if (!dsOwned)
         {
-            _logger.LogError("FTP CreateAsync: DataSource {DsId} not owned by user {UserId}", dsId, userId);
             throw new UnauthorizedAccessException("Data source does not belong to the current user.");
         }
 
         var fullPath = (vde.VirtualPath ?? "") + fileName;
         var mime = InferContentType(fileName);
-        _logger.LogInformation("FTP CreateAsync: Storing file fullPath={FullPath}, mime={Mime}", fullPath, mime);
-        try
-        {
-            await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, mime, data);
-            _logger.LogInformation("FTP CreateAsync: StoreFileAsync completed successfully for {FullPath}", fullPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "FTP CreateAsync: StoreFileAsync FAILED for {FullPath}", fullPath);
-            throw;
-        }
+        await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, mime, data);
         return null;
     }
 
