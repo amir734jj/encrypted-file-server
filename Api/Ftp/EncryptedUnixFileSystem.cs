@@ -17,6 +17,7 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
     private readonly IFileStorageService _fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
     private readonly IEncryptionProviderFactory _encryptionFactory = scope.ServiceProvider.GetRequiredService<IEncryptionProviderFactory>();
     private readonly IBackendStorageProviderFactory _backendStorageFactory = scope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
+    private readonly ILogger<EncryptedUnixFileSystem> _logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<EncryptedUnixFileSystem>();
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
     private readonly HashSet<(Guid dsId, string virtualPath)> _sessionDirs = [];
 
@@ -272,34 +273,32 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
     {
         EnsureAuthenticated();
 
-        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<EncryptedUnixFileSystem>();
-
         if (targetDirectory is not VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
         {
             throw new InvalidOperationException("Cannot create files in the root directory. Use a data source folder.");
         }
 
-        logger.LogInformation("FTP CreateAsync: dsId={DsId}, userId={UserId}, virtualPath={VPath}, fileName={FName}",
+        _logger.LogInformation("FTP CreateAsync: dsId={DsId}, userId={UserId}, virtualPath={VPath}, fileName={FName}",
             dsId, userId, vde.VirtualPath, fileName);
 
         var dsOwned = await DataSourceDal.Any(filterExprs: [d => d.Id == dsId && d.UserId == userId]);
         if (!dsOwned)
         {
-            logger.LogError("FTP CreateAsync: DataSource {DsId} not owned by user {UserId}", dsId, userId);
+            _logger.LogError("FTP CreateAsync: DataSource {DsId} not owned by user {UserId}", dsId, userId);
             throw new UnauthorizedAccessException("Data source does not belong to the current user.");
         }
 
         var fullPath = (vde.VirtualPath ?? "") + fileName;
         var mime = InferContentType(fileName);
-        logger.LogInformation("FTP CreateAsync: Storing file fullPath={FullPath}, mime={Mime}", fullPath, mime);
+        _logger.LogInformation("FTP CreateAsync: Storing file fullPath={FullPath}, mime={Mime}", fullPath, mime);
         try
         {
             await _fileStorage.StoreFileAsync(userId!.Value, dsId, fullPath, mime, data);
-            logger.LogInformation("FTP CreateAsync: StoreFileAsync completed successfully for {FullPath}", fullPath);
+            _logger.LogInformation("FTP CreateAsync: StoreFileAsync completed successfully for {FullPath}", fullPath);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "FTP CreateAsync: StoreFileAsync FAILED for {FullPath}", fullPath);
+            _logger.LogError(ex, "FTP CreateAsync: StoreFileAsync FAILED for {FullPath}", fullPath);
             throw;
         }
         return null;

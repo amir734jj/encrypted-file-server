@@ -26,12 +26,23 @@ public sealed class TicketCleanupService(IServiceScopeFactory scopeFactory, ILog
                     logger.LogInformation("Cleaned up {Count} expired access ticket(s)", deleted);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
             {
                 logger.LogError(ex, "Error cleaning up expired tickets");
             }
 
-            await Task.Delay(Interval, stoppingToken);
+            try
+            {
+                await Task.Delay(Interval, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 }

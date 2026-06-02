@@ -51,7 +51,7 @@ public sealed class EncryptedSftpServer : IDisposable
 
     public void Dispose()
     {
-        _server.Stop();
+        try { _server.Stop(); } catch (ObjectDisposedException) { }
         foreach (var sub in _activeSubsystems.Values)
             sub.Dispose();
         _activeSubsystems.Clear();

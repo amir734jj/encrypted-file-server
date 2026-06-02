@@ -79,6 +79,7 @@ public sealed class SftpSubsystem(
     private readonly System.Threading.Channels.Channel<byte[]> _inbound = Channel.CreateUnbounded<byte[]>();
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<Guid, byte[]> _masterKeyCache = new();
+    private readonly HashSet<(Guid dsId, string virtualPath)> _sessionDirs = [];
     private List<DataSource>? _cachedDataSources;
     private int _handleCounter;
     private int _bufferLen;
@@ -207,8 +208,8 @@ public sealed class SftpSubsystem(
             case SSH_FXP_WRITE: await HandleWrite(requestId, r); break;
             case SSH_FXP_REMOVE: await HandleRemove(requestId, r); break;
             case SSH_FXP_RENAME: await HandleRename(requestId, r); break;
-            case SSH_FXP_MKDIR: SendStatus(requestId, SSH_FX_OK); break;
-            case SSH_FXP_RMDIR: SendStatus(requestId, SSH_FX_OK); break;
+            case SSH_FXP_MKDIR: await HandleMkdir(requestId, r); break;
+            case SSH_FXP_RMDIR: await HandleRmdir(requestId, r); break;
             case SSH_FXP_SETSTAT:
             case SSH_FXP_FSETSTAT: SendStatus(requestId, SSH_FX_OK); break;
             default:
@@ -361,6 +362,75 @@ public sealed class SftpSubsystem(
         }));
     }
 
+    private async Task HandleMkdir(uint id, SftpReader r)
+    {
+        if (!IsAuthenticated) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
+
+        var path = NormalizePath(r.ReadString());
+        // Skip attrs
+        r.SkipAttrs();
+
+        var parts = path.TrimStart('/').Split('/', 2);
+        if (parts.Length < 2)
+        {
+            // Cannot create data sources via SFTP
+            SendStatus(id, SSH_FX_PERMISSION_DENIED);
+            return;
+        }
+
+        var ds = await FindDataSourceByNameAsync(parts[0]);
+        if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+        var subPath = parts[1].EndsWith('/') ? parts[1] : parts[1] + "/";
+        _sessionDirs.Add((ds.Id, subPath));
+        SendStatus(id, SSH_FX_OK);
+    }
+
+    private async Task HandleRmdir(uint id, SftpReader r)
+    {
+        if (!IsAuthenticated) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
+
+        var path = NormalizePath(r.ReadString());
+        var parts = path.TrimStart('/').Split('/', 2);
+        if (parts.Length < 2) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
+
+        var ds = await FindDataSourceByNameAsync(parts[0]);
+        if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+
+        var dirPrefix = parts[1].EndsWith('/') ? parts[1] : parts[1] + "/";
+        var masterKey = GetCachedMasterKey(ds);
+        var defaultMethod = ds.Backend.EncryptionMethod;
+
+        var allFiles = await _db.EncryptedFiles
+            .Where(f => f.DataSourceId == ds.Id)
+            .ToListAsync();
+
+        foreach (var f in allFiles)
+        {
+            try
+            {
+                var enc = _encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
+                var iv = Convert.FromBase64String(f.IvBase64);
+                var fullPath = enc.DecryptString(f.OriginalFileName, masterKey, iv);
+                if (fullPath.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _fileStorage.DeleteFileAsync(f);
+                }
+            }
+            catch
+            {
+                continue;
+            }
+        }
+
+        // Remove from session-tracked dirs
+        _sessionDirs.RemoveWhere(e => e.dsId == ds.Id &&
+            e.virtualPath.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase));
+
+        InvalidateCache();
+        SendStatus(id, SSH_FX_OK);
+    }
+
     #endregion
 
     #region File operations
@@ -446,7 +516,8 @@ public sealed class SftpSubsystem(
         }
         else if ((long)offset < rh.Position)
         {
-            SendStatus(id, SSH_FX_EOF);
+            // Encrypted streams are sequential — backward seeks are not supported
+            SendStatus(id, SSH_FX_FAILURE, "Backward seek not supported");
             return;
         }
 
@@ -755,6 +826,18 @@ public sealed class SftpSubsystem(
             }
         }
 
+        // Include session-tracked empty directories (matching FTP behavior)
+        foreach (var (sid, vpath) in _sessionDirs)
+        {
+            if (sid != ds.Id || !vpath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase) || vpath == pathPrefix)
+                continue;
+            var rel = vpath[pathPrefix.Length..].TrimEnd('/');
+            if (!rel.Contains('/') && seenFolders.Add(rel))
+            {
+                entries.Add(new VfsEntry(rel, true, 0, DateTimeOffset.UtcNow));
+            }
+        }
+
         return entries.OrderBy(e => !e.IsDir).ThenBy(e => e.Name).ToList();
     }
 
@@ -804,9 +887,18 @@ public sealed class SftpSubsystem(
             }
         });
 
-        return isDir
-            ? (new VfsEntry(Path.GetFileName(subPath.TrimEnd('/')), true, 0, DateTimeOffset.UtcNow), null)
-            : (null, null);
+        if (isDir)
+        {
+            return (new VfsEntry(Path.GetFileName(subPath.TrimEnd('/')), true, 0, DateTimeOffset.UtcNow), null);
+        }
+
+        // Check session-tracked empty directories
+        if (_sessionDirs.Contains((ds.Id, dirPrefix)))
+        {
+            return (new VfsEntry(Path.GetFileName(subPath.TrimEnd('/')), true, 0, DateTimeOffset.UtcNow), null);
+        }
+
+        return (null, null);
     }
 
     private async Task<EncryptedFile?> FindFileAsync(DataSource ds, string subPath)
