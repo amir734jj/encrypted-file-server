@@ -122,6 +122,16 @@ else
                                   Enabled="@(!_progressMap.ContainsKey(ds.Id))">
                             <i class="bi bi-shield-lock me-1"></i> Re-encrypt All
                         </HxButton>
+                        <HxButton Color="ThemeColor.Success" Size="ButtonSize.Small" Outline="true"
+                                  OnClick="() => CompressDataSource(ds)" title="Compress all files"
+                                  Enabled="@(!ds.Backend.UseCompression && !_progressMap.ContainsKey(ds.Id))">
+                            <i class="bi bi-file-zip me-1"></i> Compress All
+                        </HxButton>
+                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" Outline="true"
+                                  OnClick="() => DecompressDataSource(ds)" title="Decompress all files"
+                                  Enabled="@(ds.Backend.UseCompression && !_progressMap.ContainsKey(ds.Id))">
+                            <i class="bi bi-file-earmark me-1"></i> Decompress All
+                        </HxButton>
                         <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" Outline="true"
                                   OnClick="() => DuplicateDataSource(ds)">
                             <i class="bi bi-copy me-1"></i> Duplicate
@@ -213,10 +223,17 @@ else
                 <small class="text-muted">Upgrades the FTP connection to use TLS encryption.</small>
             </div>
         }
-        <div class="mb-3">
-            <HxSwitch @bind-Value="_useCompression" Text="Compress Files (Brotli)" />
-            <small class="text-muted">Compresses files before encryption. Saves space but uses more CPU.</small>
-        </div>
+        @if (!_editId.HasValue)
+        {
+            <div class="mb-3">
+                <HxSwitch @bind-Value="_useCompression" Text="Compress Files (Brotli)" />
+                <small class="text-muted">Compresses files before encryption. Saves space but uses more CPU. Use Compress/Decompress All to change later.</small>
+            </div>
+        }
+        else
+        {
+            <div class="mb-3 text-muted small"><i class="bi bi-file-zip me-1"></i>Compression: @(_useCompression ? "Enabled" : "Disabled") — use Compress/Decompress All to change.</div>
+        }
         @if (_encryptionMethod != EncryptionMethod.None && !_editId.HasValue)
         {
             <div class="mb-3">
@@ -652,6 +669,68 @@ else
         finally
         {
             _progressMap.Remove(dsId);
+            await LoadAsync();
+        }
+    }
+
+    private async Task CompressDataSource(DataSourceDto ds)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Compress all {ds.FileCount} file(s) in '{ds.Name}'? This rewrites every file with Brotli compression.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        _progressMap[ds.Id] = new BulkOperationProgress("Compress", ds.FileCount, 0);
+        StateHasChanged();
+        StartPolling(ds.Id);
+        try
+        {
+            var result = await Api.CompressDataSourceAsync(ds.Id);
+            Messenger.AddInformation($"Compressed {result.Processed}/{result.TotalFiles} file(s).");
+        }
+        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            Messenger.AddWarning("A bulk operation is already running for this data source.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Bulk compress failed: {ex.Message}");
+        }
+        finally
+        {
+            _progressMap.Remove(ds.Id);
+            await LoadAsync();
+        }
+    }
+
+    private async Task DecompressDataSource(DataSourceDto ds)
+    {
+        var confirmed = await MessageBox.ConfirmAsync($"Decompress all {ds.FileCount} file(s) in '{ds.Name}'? This rewrites every file without compression.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        _progressMap[ds.Id] = new BulkOperationProgress("Decompress", ds.FileCount, 0);
+        StateHasChanged();
+        StartPolling(ds.Id);
+        try
+        {
+            var result = await Api.DecompressDataSourceAsync(ds.Id);
+            Messenger.AddInformation($"Decompressed {result.Processed}/{result.TotalFiles} file(s).");
+        }
+        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            Messenger.AddWarning("A bulk operation is already running for this data source.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Bulk decompress failed: {ex.Message}");
+        }
+        finally
+        {
+            _progressMap.Remove(ds.Id);
             await LoadAsync();
         }
     }

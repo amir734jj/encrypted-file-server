@@ -12,4 +12,6 @@ public interface IFileStorageService
     Task<bool> DeleteFileAsync(EncryptedFile file);
     Task<EncryptedFile> DecryptFileAsync(EncryptedFile file);
     Task<EncryptedFile> ReEncryptFileAsync(EncryptedFile file, EncryptionMethod newMethod);
+    Task<EncryptedFile> CompressFileAsync(EncryptedFile file);
+    Task<EncryptedFile> DecompressFileAsync(EncryptedFile file);
 }

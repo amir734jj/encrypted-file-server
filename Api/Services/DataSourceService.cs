@@ -115,7 +115,9 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
 
             ds.Backend.BasePath = req.Backend.BasePath;
             ds.Backend.UseSsl = req.Backend.UseSsl;
-            ds.Backend.UseCompression = req.Backend.UseCompression;
+            // UseCompression is NOT updated here —
+            // changing it without rewriting files would corrupt data.
+            // Use the compress/decompress endpoints instead.
             // EncryptionMethod and MasterPassword are NOT updated here —
             // changing them without re-encrypting files would corrupt data.
             // Use the re-encrypt endpoint instead.

@@ -89,6 +89,8 @@ public sealed class ApiService(
     public Task DeleteDataSourceAsync(Guid id) => dataSourcesApi.DeleteAsync(id);
     public Task<BulkOperationResult> DecryptDataSourceAsync(Guid id) => dataSourcesApi.DecryptAllAsync(id);
     public Task<BulkOperationResult> ReEncryptDataSourceAsync(Guid id, EncryptionMethod method) => dataSourcesApi.ReEncryptAllAsync(id, method);
+    public Task<BulkOperationResult> CompressDataSourceAsync(Guid id) => dataSourcesApi.CompressAllAsync(id);
+    public Task<BulkOperationResult> DecompressDataSourceAsync(Guid id) => dataSourcesApi.DecompressAllAsync(id);
     public Task<BulkOperationProgress?> GetDataSourceProgressAsync(Guid id) => dataSourcesApi.GetProgressAsync(id);
     public Task<MasterPasswordResponse> GetMasterPasswordAsync(Guid id) => dataSourcesApi.GetMasterPasswordAsync(id);
     public Task<DataSourceCredentialsResponse> GetCredentialsAsync(Guid id) => dataSourcesApi.GetCredentialsAsync(id);

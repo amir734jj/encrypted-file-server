@@ -281,6 +281,91 @@ public sealed class FileStorageService(
         return updated;
     }
 
+    public async Task<EncryptedFile> CompressFileAsync(EncryptedFile file)
+    {
+        if (file.IsCompressed)
+        {
+            return file; // already compressed
+        }
+
+        return await RewriteWithCompressionChangeAsync(file, compress: true);
+    }
+
+    public async Task<EncryptedFile> DecompressFileAsync(EncryptedFile file)
+    {
+        if (!file.IsCompressed)
+        {
+            return file; // already uncompressed
+        }
+
+        return await RewriteWithCompressionChangeAsync(file, compress: false);
+    }
+
+    /// <summary>
+    /// Rewrites a file's backend blob with or without compression.
+    /// Flow: read → decrypt → (decompress if needed) → (compress if needed) → encrypt → write new blob.
+    /// </summary>
+    private async Task<EncryptedFile> RewriteWithCompressionChangeAsync(EncryptedFile file, bool compress)
+    {
+        var ds = await GetDataSource(file.DataSourceId);
+        var method = file.EncryptionMethod ?? ds.Backend.EncryptionMethod;
+        var encryption = encryptionFactory.GetProvider(method);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+        var oldIv = Convert.FromBase64String(file.IvBase64);
+        var connection = ds.ToBackendConnectionInfo();
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
+
+        var isNone = method == EncryptionMethod.None;
+        var originalFileName = encryption.DecryptString(file.OriginalFileName, masterKey, oldIv);
+        var originalContentType = file.ContentType is not null
+            ? encryption.DecryptString(file.ContentType, masterKey, oldIv) : null;
+
+        var newFileId = Guid.NewGuid();
+        var newRelativePath = isNone ? originalFileName : $"{newFileId}.enc";
+
+        // Read the fully decrypted (and decompressed) content via OpenDecryptedStreamAsync
+        await using var plainStream = await OpenDecryptedStreamAsync(file);
+
+        // Write to new blob: compress (optional) → encrypt → backend
+        var (destStream, newStoragePath) = await storage.OpenWriteAsync(connection, newRelativePath);
+        var (cryptoStream, newIv) = encryption.CreateEncryptingStream(destStream, masterKey);
+        await using (destStream)
+        await using (cryptoStream)
+        {
+            if (compress)
+            {
+                await using var brotli = new BrotliStream(cryptoStream, CompressionLevel.Optimal);
+                await plainStream.CopyToAsync(brotli);
+            }
+            else
+            {
+                await plainStream.CopyToAsync(cryptoStream);
+            }
+        }
+
+        // Update DB first
+        var oldStoragePath = file.StoragePath;
+        file.StoragePath = newStoragePath;
+        file.OriginalFileName = encryption.EncryptString(originalFileName, masterKey, newIv);
+        file.ContentType = originalContentType is not null
+            ? encryption.EncryptString(originalContentType, masterKey, newIv) : null;
+        file.IvBase64 = Convert.ToBase64String(newIv);
+        file.IsCompressed = compress;
+        file.UpdatedAt = DateTimeOffset.UtcNow;
+        var updated = await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
+        {
+            existing.StoragePath = file.StoragePath;
+            existing.OriginalFileName = file.OriginalFileName;
+            existing.ContentType = file.ContentType;
+            existing.IvBase64 = file.IvBase64;
+            existing.IsCompressed = file.IsCompressed;
+            existing.UpdatedAt = file.UpdatedAt;
+        }));
+
+        await storage.DeleteAsync(connection, oldStoragePath);
+        return updated;
+    }
+
     /// <summary>
     /// Streams data from an existing backend blob through a decrypt→encrypt pipe into a new blob.
     /// Never buffers the entire file in memory.

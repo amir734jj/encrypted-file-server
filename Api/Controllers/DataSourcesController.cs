@@ -21,6 +21,7 @@ public sealed class DataSourcesController(
     private static readonly ConcurrentDictionary<Guid, BulkOperationProgress> RunningOps = new();
 
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
+    private IBasicCrud<DataSource> DsDal => repository.For<DataSource>();
     private Guid CurrentUserId => User.GetUserId();
 
     [HttpGet("{id:guid}/progress")]
@@ -170,6 +171,94 @@ public sealed class DataSourcesController(
                 }
                 catch { /* skip files that fail */ }
             }
+
+            return Ok(new BulkOperationResult(files.Count, processed));
+        }
+        finally
+        {
+            RunningOps.TryRemove(id, out _);
+        }
+    }
+
+    [HttpPost("{id:guid}/compress")]
+    public async Task<IActionResult> CompressAll(Guid id)
+    {
+        if (await dataSourceService.GetByIdAsync(id, CurrentUserId) is null)
+        {
+            return NotFound();
+        }
+
+        if (!RunningOps.TryAdd(id, new BulkOperationProgress("Compress", 0, 0)))
+        {
+            return Conflict("A bulk operation is already running for this data source.");
+        }
+
+        try
+        {
+            var files = (await FileDal.GetAll(
+                filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
+                project: f => f)).ToList();
+
+            RunningOps[id] = new BulkOperationProgress("Compress", files.Count, 0);
+
+            var processed = 0;
+            foreach (var file in files)
+            {
+                try
+                {
+                    await fileStorage.CompressFileAsync(file);
+                    processed++;
+                    RunningOps[id] = new BulkOperationProgress("Compress", files.Count, processed);
+                }
+                catch { /* skip files that fail */ }
+            }
+
+            // Update data source setting so new files are also compressed
+            await DsDal.Update(id, ds => ds.Backend.UseCompression = true);
+
+            return Ok(new BulkOperationResult(files.Count, processed));
+        }
+        finally
+        {
+            RunningOps.TryRemove(id, out _);
+        }
+    }
+
+    [HttpPost("{id:guid}/decompress")]
+    public async Task<IActionResult> DecompressAll(Guid id)
+    {
+        if (await dataSourceService.GetByIdAsync(id, CurrentUserId) is null)
+        {
+            return NotFound();
+        }
+
+        if (!RunningOps.TryAdd(id, new BulkOperationProgress("Decompress", 0, 0)))
+        {
+            return Conflict("A bulk operation is already running for this data source.");
+        }
+
+        try
+        {
+            var files = (await FileDal.GetAll(
+                filterExprs: [f => f.DataSourceId == id && f.UserId == CurrentUserId],
+                project: f => f)).ToList();
+
+            RunningOps[id] = new BulkOperationProgress("Decompress", files.Count, 0);
+
+            var processed = 0;
+            foreach (var file in files)
+            {
+                try
+                {
+                    await fileStorage.DecompressFileAsync(file);
+                    processed++;
+                    RunningOps[id] = new BulkOperationProgress("Decompress", files.Count, processed);
+                }
+                catch { /* skip files that fail */ }
+            }
+
+            // Update data source setting so new files are no longer compressed
+            await DsDal.Update(id, ds => ds.Backend.UseCompression = false);
 
             return Ok(new BulkOperationResult(files.Count, processed));
         }
