@@ -9,4 +9,5 @@ public record BackendDto(
     string Username,
     string BasePath,
     bool UseSsl,
-    EncryptionMethod EncryptionMethod);
+    EncryptionMethod EncryptionMethod,
+    bool UseCompression);

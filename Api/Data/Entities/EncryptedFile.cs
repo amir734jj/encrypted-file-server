@@ -26,6 +26,11 @@ public sealed class EncryptedFile : IEntity
     /// </summary>
     public string IvBase64 { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Whether the file content was compressed before encryption.
+    /// </summary>
+    public bool IsCompressed { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
 }

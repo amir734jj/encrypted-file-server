@@ -20,4 +20,9 @@ public sealed class BackendConfig
     /// allowing re-attachment to an existing backend.
     /// </summary>
     public string MasterPassword { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When enabled, files are compressed with Brotli before encryption.
+    /// </summary>
+    public bool UseCompression { get; set; }
 }

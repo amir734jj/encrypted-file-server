@@ -82,6 +82,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
                 UseSsl = req.Backend.UseSsl,
                 EncryptionMethod = req.Backend.EncryptionMethod,
                 MasterPassword = req.Backend.MasterPassword,
+                UseCompression = req.Backend.UseCompression,
             },
             Frontends = req.Frontends.Select(f => new FrontendConfig
             {
@@ -114,6 +115,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
 
             ds.Backend.BasePath = req.Backend.BasePath;
             ds.Backend.UseSsl = req.Backend.UseSsl;
+            ds.Backend.UseCompression = req.Backend.UseCompression;
             // EncryptionMethod and MasterPassword are NOT updated here —
             // changing them without re-encrypting files would corrupt data.
             // Use the re-encrypt endpoint instead.
@@ -172,6 +174,6 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
     private static DataSourceDto ToDto(DataSource d, long totalSize, int fileCount) =>
         new(d.Id, d.Name, totalSize, fileCount, d.CreatedAt,
             new BackendDto(d.Backend.Protocol, d.Backend.Host, d.Backend.Port, d.Backend.Username,
-                d.Backend.BasePath, d.Backend.UseSsl, d.Backend.EncryptionMethod),
+                d.Backend.BasePath, d.Backend.UseSsl, d.Backend.EncryptionMethod, d.Backend.UseCompression),
             d.Frontends.Select(f => new FrontendDto(f.Type, f.AllowAnonymous)).ToList());
 }

@@ -54,6 +54,10 @@ else
                             <span class="badge @badgeClass me-1 mt-1">@fe.Type @(fe.AllowAnonymous ? "(anon)" : "")</span>
                         }
                         <span class="badge bg-secondary me-1 mt-1">@ds.Backend.EncryptionMethod</span>
+                        @if (ds.Backend.UseCompression)
+                        {
+                            <span class="badge bg-info me-1 mt-1">Compressed</span>
+                        }
                         @if (ds.Backend.EncryptionMethod != EncryptionMethod.None && _revealedPasswords.TryGetValue(ds.Id, out var pwd))
                         {
                             <div class="mt-1">
@@ -209,6 +213,10 @@ else
                 <small class="text-muted">Upgrades the FTP connection to use TLS encryption.</small>
             </div>
         }
+        <div class="mb-3">
+            <HxSwitch @bind-Value="_useCompression" Text="Compress Files (Brotli)" />
+            <small class="text-muted">Compresses files before encryption. Saves space but uses more CPU.</small>
+        </div>
         @if (_encryptionMethod != EncryptionMethod.None && !_editId.HasValue)
         {
             <div class="mb-3">
@@ -311,6 +319,7 @@ else
     private bool _sftpEnabled;
     private bool _sftpAnon;
     private EncryptionMethod _encryptionMethod = EncryptionMethod.AesCtr256;
+    private bool _useCompression;
 
     protected override async Task OnInitializedAsync()
     {
@@ -408,6 +417,7 @@ else
         _sftpEnabled = true;
         _sftpAnon = false;
         _encryptionMethod = EncryptionMethod.AesCtr256;
+        _useCompression = false;
         await _modal.ShowAsync();
     }
 
@@ -434,6 +444,7 @@ else
         _backendPath = ds.Backend.BasePath;
         _backendSsl = ds.Backend.UseSsl;
         _encryptionMethod = ds.Backend.EncryptionMethod;
+        _useCompression = ds.Backend.UseCompression;
         _masterPassword = creds?.MasterPassword ?? string.Empty;
         var ftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Ftp);
         var httpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
@@ -469,6 +480,7 @@ else
         _sftpEnabled = sftpFrontend is not null;
         _sftpAnon = sftpFrontend?.AllowAnonymous ?? false;
         _encryptionMethod = ds.Backend.EncryptionMethod;
+        _useCompression = ds.Backend.UseCompression;
         await _modal.ShowAsync();
     }
 
@@ -500,7 +512,7 @@ else
     {
         try
         {
-            var backend = new BackendRequest(_backendProtocol, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath.TrimStart('/'), _backendSsl, _encryptionMethod, _masterPassword);
+            var backend = new BackendRequest(_backendProtocol, _backendHost, _backendPort, _backendUser, _backendPass, _backendPath.TrimStart('/'), _backendSsl, _encryptionMethod, _masterPassword, _useCompression);
             var frontends = new List<FrontendRequest>();
             if (_ftpEnabled)
             {

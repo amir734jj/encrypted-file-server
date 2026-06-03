@@ -11,4 +11,5 @@ public record BackendRequest(
     string BasePath = "/",
     bool UseSsl = false,
     EncryptionMethod EncryptionMethod = EncryptionMethod.AesCtr256,
-    string MasterPassword = "");
+    string MasterPassword = "",
+    bool UseCompression = false);

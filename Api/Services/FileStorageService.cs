@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
@@ -31,6 +32,7 @@ public sealed class FileStorageService(
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var isNone = ds.Backend.EncryptionMethod == EncryptionMethod.None;
+        var compress = ds.Backend.UseCompression;
 
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var fileId = Guid.NewGuid();
@@ -48,7 +50,15 @@ public sealed class FileStorageService(
             iv = fileIv;
             await using (cryptoStream)
             {
-                originalSize = await CopyAndCountAsync(content, cryptoStream);
+                if (compress)
+                {
+                    await using var brotli = new BrotliStream(cryptoStream, CompressionLevel.Optimal);
+                    originalSize = await CopyAndCountAsync(content, brotli);
+                }
+                else
+                {
+                    originalSize = await CopyAndCountAsync(content, cryptoStream);
+                }
             }
         }
 
@@ -62,6 +72,7 @@ public sealed class FileStorageService(
             ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
             OriginalFileSize = originalSize,
             EncryptionMethod = ds.Backend.EncryptionMethod,
+            IsCompressed = compress,
             IvBase64 = Convert.ToBase64String(iv),
             CreatedAt = DateTimeOffset.UtcNow
         });
@@ -83,6 +94,7 @@ public sealed class FileStorageService(
         var ds = dataSources.First();
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var isNone = ds.Backend.EncryptionMethod == EncryptionMethod.None;
+        var compress = ds.Backend.UseCompression;
 
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var fileId = Guid.NewGuid();
@@ -93,7 +105,14 @@ public sealed class FileStorageService(
         var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, relativePath);
         var (cryptoStream, iv) = encryption.CreateEncryptingStream(destinationStream, masterKey);
 
-        return new StreamingWriteHandle(cryptoStream, destinationStream, async bytesWritten =>
+        // If compression is enabled, wrap the crypto stream with Brotli.
+        // BrotliStream disposes its inner stream by default, so StreamingWriteHandle
+        // disposing the outermost stream cascades correctly.
+        Stream writeStream = compress
+            ? new BrotliStream(cryptoStream, CompressionLevel.Optimal)
+            : cryptoStream;
+
+        return new StreamingWriteHandle(writeStream, destinationStream, async bytesWritten =>
         {
             var entity = await FileDal.Save(new EncryptedFile
             {
@@ -105,6 +124,7 @@ public sealed class FileStorageService(
                 ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
                 OriginalFileSize = bytesWritten,
                 EncryptionMethod = ds.Backend.EncryptionMethod,
+                IsCompressed = compress,
                 IvBase64 = Convert.ToBase64String(iv),
                 CreatedAt = DateTimeOffset.UtcNow
             });
@@ -122,7 +142,10 @@ public sealed class FileStorageService(
         var connection = ds.ToBackendConnectionInfo();
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var fileStream = await storage.OpenReadAsync(connection, file.StoragePath);
-        return encryption.CreateDecryptingStream(fileStream, masterKey, iv);
+        Stream decrypted = encryption.CreateDecryptingStream(fileStream, masterKey, iv);
+        return file.IsCompressed
+            ? new BrotliStream(decrypted, CompressionMode.Decompress)
+            : decrypted;
     }
 
     public async Task<Stream> OpenRawStreamAsync(EncryptedFile file)
