@@ -1,4 +1,5 @@
 using FluentFTP;
+using Microsoft.Extensions.Logging;
 using Shared.Contracts;
 using Shared.Interfaces;
 
@@ -8,7 +9,7 @@ namespace Api.Services.Backend;
 /// Stores encrypted file blobs on a remote FTP server via FluentFTP.
 /// Each call receives per-datasource connection info.
 /// </summary>
-public sealed class FtpBackendStorageProvider() : IBackendStorageProvider
+public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider> logger) : IBackendStorageProvider
 {
     public string ProviderKey => "ftp-client";
     public BackendStorageType StorageType => BackendStorageType.FtpClient;
@@ -19,12 +20,25 @@ public sealed class FtpBackendStorageProvider() : IBackendStorageProvider
         var storagePath = $"{connection.BasePath.TrimEnd('/')}/{relativePath}";
         var client = await ConnectAsync(connection, ct);
 
+        logger.LogInformation("FTP connected to {Host}:{Port} as {User}. Working dir: {Pwd}",
+            connection.Host, connection.Port, connection.Username, await client.GetWorkingDirectory(ct));
+        logger.LogInformation("FTP writing to storagePath={StoragePath}, basePath={BasePath}, relativePath={RelativePath}",
+            storagePath, connection.BasePath, relativePath);
+
         var dir = Path.GetDirectoryName(storagePath)?.Replace('\\', '/');
-        if (!string.IsNullOrEmpty(dir) && !await client.DirectoryExists(dir, ct))
+        logger.LogInformation("FTP directory to ensure: {Dir}", dir);
+        if (!string.IsNullOrEmpty(dir))
         {
-            await client.CreateDirectory(dir, ct);
+            var dirExists = await client.DirectoryExists(dir, ct);
+            logger.LogInformation("FTP directory {Dir} exists: {Exists}", dir, dirExists);
+            if (!dirExists)
+            {
+                await client.CreateDirectory(dir, ct);
+                logger.LogInformation("FTP created directory {Dir}", dir);
+            }
         }
 
+        logger.LogInformation("FTP calling OpenWrite({StoragePath})", storagePath);
         var stream = await client.OpenWrite(storagePath, token: ct);
         return (new FtpWriteStream(stream, client), storagePath);
     }
