@@ -29,7 +29,7 @@ public sealed class BrowseController(
     [HttpGet]
     public async Task<IActionResult> ListUsers()
     {
-        var userId = GetAuthenticatedUserId();
+        var userId = ResolveUserId();
 
         // Try HTTP Basic auth via access tickets
         if (userId is null)
@@ -207,7 +207,7 @@ public sealed class BrowseController(
         return Content(html, "text/html");
     }
 
-    private Guid? GetAuthenticatedUserId()
+    private Guid? ResolveUserId()
     {
         if (User.Identity?.IsAuthenticated == true)
         {
