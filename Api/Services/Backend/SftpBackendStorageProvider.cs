@@ -80,14 +80,6 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
         return Task.FromResult(newStoragePath);
     }
 
-    public Task<long> GetFileSizeAsync(
-        BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
-    {
-        using var client = Connect(connection);
-        var attrs = client.GetAttributes(storagePath);
-        return Task.FromResult(attrs.Size);
-    }
-
     private static SftpClient Connect(BackendConnectionInfo connection)
     {
         var client = new SftpClient(connection.Host, connection.Port, connection.Username, connection.Password);

@@ -28,7 +28,4 @@ public interface IBackendStorageProvider
 
     /// <summary>Renames/moves a file on the remote backend. Returns the new full storage path.</summary>
     Task<string> RenameAsync(BackendConnectionInfo connection, string oldStoragePath, string newRelativePath, CancellationToken ct = default);
-
-    /// <summary>Returns the size of a file on the remote backend in bytes.</summary>
-    Task<long> GetFileSizeAsync(BackendConnectionInfo connection, string storagePath, CancellationToken ct = default);
 }
