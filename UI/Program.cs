@@ -40,10 +40,8 @@ foreach (var apiType in new[]
     typeof(IUsersApi),
     typeof(IProfileApi),
     typeof(IDataSourcesApi),
-    typeof(IFilesApi),
     typeof(IGlobalConfigApi),
     typeof(ITicketsApi),
-    typeof(IRemoteImportApi)
 })
 {
     builder.Services
@@ -52,6 +50,23 @@ foreach (var apiType in new[]
         {
             c.BaseAddress = new Uri(apiBaseUrl);
             c.Timeout = TimeSpan.FromSeconds(120);
+        })
+        .AddHttpMessageHandler<BearerTokenHandler>();
+}
+
+// File and remote-import APIs get a longer timeout for large uploads/transfers
+foreach (var apiType in new[]
+{
+    typeof(IFilesApi),
+    typeof(IRemoteImportApi)
+})
+{
+    builder.Services
+        .AddRefitClient(apiType, refitSettings)
+        .ConfigureHttpClient(c =>
+        {
+            c.BaseAddress = new Uri(apiBaseUrl);
+            c.Timeout = TimeSpan.FromMinutes(30);
         })
         .AddHttpMessageHandler<BearerTokenHandler>();
 }
