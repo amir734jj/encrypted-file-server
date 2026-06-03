@@ -343,7 +343,9 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                     filterExprs: [f => f.DataSourceId == dsId && f.UserId == userId],
                     project: f => f)).ToList();
                 foreach (var f in allFiles)
+                {
                     await _fileStorage.DeleteFileAsync(f);
+                }
 
                 await DataSourceDal.Delete(ds.Id);
             }

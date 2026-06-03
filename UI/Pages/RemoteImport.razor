@@ -350,7 +350,10 @@
         else
         {
             _selectedFiles.Clear();
-            foreach (var f in files) _selectedFiles.Add(f);
+            foreach (var f in files)
+            {
+                _selectedFiles.Add(f);
+            }
         }
     }
 

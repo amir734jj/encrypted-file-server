@@ -248,7 +248,9 @@ public sealed class FilesController(
         }).ToList();
 
         foreach (var file in toDelete)
+        {
             await fileStorage.DeleteFileAsync(file);
+        }
 
         return Ok(new { Deleted = toDelete.Count });
     }

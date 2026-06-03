@@ -18,7 +18,7 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
     {
         try
         {
-            var storagePath = $"{connection.BasePath.TrimEnd('/')}/{relativePath}";
+            var storagePath = connection.ResolveStoragePath(relativePath);
             var client = Connect(connection);
 
             var dir = Path.GetDirectoryName(storagePath)?.Replace('\\', '/');
@@ -67,7 +67,7 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
     public Task<string> RenameAsync(
         BackendConnectionInfo connection, string oldStoragePath, string newRelativePath, CancellationToken ct = default)
     {
-        var newStoragePath = $"{connection.BasePath.TrimEnd('/')}/{newRelativePath}";
+        var newStoragePath = connection.ResolveStoragePath(newRelativePath);
         using var client = Connect(connection);
 
         var dir = Path.GetDirectoryName(newStoragePath)?.Replace('\\', '/');

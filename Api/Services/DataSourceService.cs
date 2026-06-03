@@ -156,7 +156,9 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             filterExprs: [f => f.DataSourceId == id],
             project: f => f)).ToList();
         foreach (var file in files)
+        {
             await fileStorage.DeleteFileAsync(file);
+        }
 
         await Dal.Delete(id);
         return true;

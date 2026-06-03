@@ -12,4 +12,10 @@ public record BackendConnectionInfo(
     string Password,
     string BasePath,
     bool UseSsl,
-    BackendStorageType Protocol = BackendStorageType.FtpClient);
+    BackendStorageType Protocol = BackendStorageType.FtpClient)
+{
+    public string ResolveStoragePath(string relativePath) =>
+        string.IsNullOrWhiteSpace(BasePath)
+            ? relativePath
+            : $"{BasePath.TrimEnd('/')}/{relativePath}";
+}

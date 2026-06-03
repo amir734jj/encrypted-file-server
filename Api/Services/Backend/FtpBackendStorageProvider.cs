@@ -17,7 +17,7 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
     public async Task<(Stream stream, string storagePath)> OpenWriteAsync(
         BackendConnectionInfo connection, string relativePath, CancellationToken ct = default)
     {
-        var storagePath = $"{connection.BasePath.TrimEnd('/')}/{relativePath}";
+        var storagePath = connection.ResolveStoragePath(relativePath);
         var client = await ConnectAsync(connection, ct);
 
         logger.LogInformation("FTP connected to {Host}:{Port} as {User}. Working dir: {Pwd}",
@@ -74,7 +74,7 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
     public async Task<string> RenameAsync(
         BackendConnectionInfo connection, string oldStoragePath, string newRelativePath, CancellationToken ct = default)
     {
-        var newStoragePath = $"{connection.BasePath.TrimEnd('/')}/{newRelativePath}";
+        var newStoragePath = connection.ResolveStoragePath(newRelativePath);
         using var client = await ConnectAsync(connection, ct);
 
         var dir = Path.GetDirectoryName(newStoragePath)?.Replace('\\', '/');

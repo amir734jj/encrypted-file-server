@@ -53,7 +53,10 @@ public sealed class EncryptedSftpServer : IDisposable
     {
         try { _server.Stop(); } catch (ObjectDisposedException) { }
         foreach (var sub in _activeSubsystems.Values)
+        {
             sub.Dispose();
+        }
+
         _activeSubsystems.Clear();
     }
 
@@ -62,15 +65,15 @@ public sealed class EncryptedSftpServer : IDisposable
         _logger.LogDebug("SSH connection accepted");
 
         Guid? authenticatedUserId = null;
-        bool isAnonymous = false;
+        bool isAnonymous;
 
         session.ServiceRegistered += (_, service) =>
         {
-            if (service is UserauthService userauth)
+            if (service is UserauthService userAuth)
             {
-                userauth.Userauth += (_, e) =>
+                userAuth.Userauth += async (_, e) =>
                 {
-                    var (accepted, userId) = ValidateCredentials(e.Username, e.Password);
+                    var (accepted, userId) = await ValidateCredentials(e.Username, e.Password);
                     authenticatedUserId = userId;
                     isAnonymous = accepted && !userId.HasValue;
                     e.Result = accepted;
@@ -104,25 +107,24 @@ public sealed class EncryptedSftpServer : IDisposable
         };
     }
 
-    private (bool accepted, Guid? userId) ValidateCredentials(string username, string password)
+    private async Task<(bool accepted, Guid? userId)> ValidateCredentials(string username, string password)
     {
         using var scope = _scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IEfRepository>();
 
         if (string.Equals(username, "anonymous", StringComparison.OrdinalIgnoreCase))
         {
-            var hasAnon = repository.For<DataSource>()
-                .Any(filterExprs: [d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous)])
-                .GetAwaiter().GetResult();
+            var hasAnon = await repository.For<DataSource>()
+                .Any(filterExprs: [d => d.Frontends.Any(f => f.Type == FrontendType.Sftp && f.AllowAnonymous)]);
             return (hasAnon, null);
         }
 
-        var tickets = repository.For<AccessTicket>()
-            .GetAll(
-                filterExprs: [t => t.Username == username && t.Password == password && t.ExpiresAt > DateTimeOffset.UtcNow],
-                project: t => t,
-                maxResults: 1)
-            .GetAwaiter().GetResult().ToList();
+        var tickets = (await repository.For<AccessTicket>()
+                .GetAll(
+                    filterExprs: [t => t.Username == username && t.Password == password && t.ExpiresAt > DateTimeOffset.UtcNow],
+                    project: t => t,
+                    maxResults: 1))
+            .ToList();
 
         if (tickets.Count == 0)
         {
@@ -133,7 +135,7 @@ public sealed class EncryptedSftpServer : IDisposable
 
         // Reject if the ticket owner's account is disabled
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
-        var ticketOwner = userManager.FindByIdAsync(ticket.UserId.ToString()).GetAwaiter().GetResult();
+        var ticketOwner = await userManager.FindByIdAsync(ticket.UserId.ToString());
         if (ticketOwner is null || !ticketOwner.IsActive)
         {
             return (false, null);
