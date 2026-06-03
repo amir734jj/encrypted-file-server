@@ -8,6 +8,7 @@ using Api.Data.Entities;
 using EfCoreRepository.Extensions;
 using Api.Extensions;
 using Api.Ftp;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Api.Interfaces;
 using Api.Middleware;
 using Api.Services;
@@ -65,7 +66,9 @@ var connectionString = ConnectionStringUtility.ConnectionStringUrlToPgResource(
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("DATABASE_URL or ConnectionStrings:DefaultConnection is required."));
 
-builder.Services.AddDbContext<AppDbContext>(opt => opt.UseNpgsql(connectionString));
+builder.Services.AddDbContext<AppDbContext>(opt => opt
+    .UseNpgsql(connectionString)
+    .ConfigureWarnings(w => w.Ignore(CoreEventId.RowLimitingOperationWithoutOrderByWarning)));
 
 builder.Services.AddEfRepository<AppDbContext>(x =>
 {
