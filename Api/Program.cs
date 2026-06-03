@@ -236,6 +236,8 @@ using (var scope = app.Services.CreateScope())
     {
         "ALTER TABLE \"DataSources\" ADD COLUMN IF NOT EXISTS \"BackendProtocol\" varchar(20) NOT NULL DEFAULT 'FtpClient'",
         "ALTER TABLE \"EncryptedFiles\" ADD COLUMN IF NOT EXISTS \"EncryptionMethod\" integer",
+        "ALTER TABLE \"DataSources\" ADD COLUMN IF NOT EXISTS \"BackendUseCompression\" boolean NOT NULL DEFAULT false",
+        "ALTER TABLE \"EncryptedFiles\" ADD COLUMN IF NOT EXISTS \"IsCompressed\" boolean NOT NULL DEFAULT false",
     };
     foreach (var sql in patches)
     {
