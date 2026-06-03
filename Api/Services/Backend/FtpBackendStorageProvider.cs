@@ -87,6 +87,13 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         return newStoragePath;
     }
 
+    public async Task<long> GetFileSizeAsync(
+        BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
+    {
+        using var client = await ConnectAsync(connection, ct);
+        return await client.GetFileSize(storagePath, -1, ct);
+    }
+
     private static async Task<AsyncFtpClient> ConnectAsync(BackendConnectionInfo connection, CancellationToken ct)
     {
         var client = new AsyncFtpClient(connection.Host, connection.Username, connection.Password, connection.Port);

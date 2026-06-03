@@ -6,6 +6,7 @@ using System.Threading.RateLimiting;
 using Api.Data;
 using Api.Data.Entities;
 using EfCoreRepository.Extensions;
+using EfCoreRepository.Interfaces;
 using Api.Extensions;
 using Api.Ftp;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -244,6 +245,61 @@ using (var scope = app.Services.CreateScope())
     {
         try { await db.Database.ExecuteSqlRawAsync(sql); }
         catch { /* column already exists */ }
+    }
+}
+
+// Backfill StoredFileSize for existing files that don't have it yet
+using (var backfillScope = app.Services.CreateScope())
+{
+    var repo = backfillScope.ServiceProvider.GetRequiredService<IEfRepository>();
+    var storageFactory = backfillScope.ServiceProvider.GetRequiredService<IBackendStorageProviderFactory>();
+    var fileDal = repo.For<Api.Data.Entities.EncryptedFile>();
+    var dsDal = repo.For<Api.Data.Entities.DataSource>();
+
+    var filesToBackfill = (await fileDal.GetAll(
+        filterExprs: [f => f.StoredFileSize == 0],
+        project: f => f)).ToList();
+
+    if (filesToBackfill.Count > 0)
+    {
+        Log.Information("Backfilling StoredFileSize for {Count} file(s)...", filesToBackfill.Count);
+
+        // Group by data source to reuse connection info
+        var grouped = filesToBackfill.GroupBy(f => f.DataSourceId);
+        foreach (var group in grouped)
+        {
+            try
+            {
+                var dataSources = (await dsDal.GetAll(
+                    filterExprs: [d => d.Id == group.Key],
+                    project: d => d,
+                    maxResults: 1)).ToList();
+                if (dataSources.Count == 0) continue;
+
+                var ds = dataSources.First();
+                var connection = ds.ToBackendConnectionInfo();
+                var storage = storageFactory.GetProvider(ds.Backend.Protocol);
+
+                foreach (var file in group)
+                {
+                    try
+                    {
+                        var size = await storage.GetFileSizeAsync(connection, file.StoragePath);
+                        await fileDal.Update(file.Id, existing => existing.StoredFileSize = size);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Failed to get size for file {FileId} at {Path}", file.Id, file.StoragePath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Failed to backfill sizes for data source {DsId}", group.Key);
+            }
+        }
+
+        Log.Information("StoredFileSize backfill complete.");
     }
 }
 
