@@ -1,6 +1,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 WORKDIR /src
 
+ENV DOTNET_NUGET_SIGNATURE_VERIFICATION=false
+
 COPY . .
 RUN dotnet restore
 
