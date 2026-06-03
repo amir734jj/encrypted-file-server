@@ -101,7 +101,7 @@ public sealed class RawBrowseController(
             {
                 Name = storageName,
                 Href = $"/raw/{dataSourceId}/{f.Id}",
-                Size = f.OriginalFileSize,
+                Size = f.StoredFileSize > 0 ? f.StoredFileSize : f.OriginalFileSize,
                 Modified = f.CreatedAt
             });
         }

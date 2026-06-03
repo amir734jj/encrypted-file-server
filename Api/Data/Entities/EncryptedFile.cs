@@ -16,6 +16,11 @@ public sealed class EncryptedFile : IEntity
     public long OriginalFileSize { get; set; }
 
     /// <summary>
+    /// Size of the file as stored on the backend (after compression + encryption).
+    /// </summary>
+    public long StoredFileSize { get; set; }
+
+    /// <summary>
     /// The encryption method used for this specific file.
     /// Falls back to the data source default for legacy files that don't have this set.
     /// </summary>

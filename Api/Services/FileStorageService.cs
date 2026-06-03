@@ -3,6 +3,7 @@ using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
 using Api.Services.Backend;
+using Api.Utilities;
 using EfCoreRepository.Interfaces;
 using Shared.Interfaces;
 using Shared.Models;
@@ -44,9 +45,10 @@ public sealed class FileStorageService(
 
         byte[] iv;
         long originalSize = 0;
-        await using (destinationStream)
+        var counter = new CountingStream(destinationStream);
+        await using (counter)
         {
-            var (cryptoStream, fileIv) = encryption.CreateEncryptingStream(destinationStream, masterKey);
+            var (cryptoStream, fileIv) = encryption.CreateEncryptingStream(counter, masterKey);
             iv = fileIv;
             await using (cryptoStream)
             {
@@ -71,6 +73,7 @@ public sealed class FileStorageService(
             StoragePath = storagePath,
             ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
             OriginalFileSize = originalSize,
+            StoredFileSize = counter.BytesWritten,
             EncryptionMethod = ds.Backend.EncryptionMethod,
             IsCompressed = compress,
             IvBase64 = Convert.ToBase64String(iv),
@@ -103,7 +106,8 @@ public sealed class FileStorageService(
 
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var (destinationStream, storagePath) = await storage.OpenWriteAsync(connection, relativePath);
-        var (cryptoStream, iv) = encryption.CreateEncryptingStream(destinationStream, masterKey);
+        var counter = new CountingStream(destinationStream);
+        var (cryptoStream, iv) = encryption.CreateEncryptingStream(counter, masterKey);
 
         // If compression is enabled, wrap the crypto stream with Brotli.
         // BrotliStream disposes its inner stream by default, so StreamingWriteHandle
@@ -112,7 +116,7 @@ public sealed class FileStorageService(
             ? new BrotliStream(cryptoStream, CompressionLevel.Optimal)
             : cryptoStream;
 
-        return new StreamingWriteHandle(writeStream, destinationStream, async bytesWritten =>
+        return new StreamingWriteHandle(writeStream, counter, async bytesWritten =>
         {
             var entity = await FileDal.Save(new EncryptedFile
             {
@@ -123,6 +127,7 @@ public sealed class FileStorageService(
                 StoragePath = storagePath,
                 ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
                 OriginalFileSize = bytesWritten,
+                StoredFileSize = counter.BytesWritten,
                 EncryptionMethod = ds.Backend.EncryptionMethod,
                 IsCompressed = compress,
                 IvBase64 = Convert.ToBase64String(iv),
@@ -195,7 +200,7 @@ public sealed class FileStorageService(
         var newFileId = Guid.NewGuid();
         var newRelativePath = originalFileName; // store under original name when unencrypted
         var noneEncryption = encryptionFactory.GetProvider(EncryptionMethod.None);
-        var (newIv, newStoragePath) = await PipeTransformAsync(
+        var (newIv, newStoragePath, storedSize) = await PipeTransformAsync(
             storage, connection, file.StoragePath,
             oldEncryption, masterKey, iv,
             noneEncryption, masterKey,
@@ -209,6 +214,7 @@ public sealed class FileStorageService(
             ? noneEncryption.EncryptString(originalContentType, masterKey, newIv) : null;
         file.IvBase64 = Convert.ToBase64String(newIv);
         file.EncryptionMethod = EncryptionMethod.None;
+        file.StoredFileSize = storedSize;
         file.UpdatedAt = DateTimeOffset.UtcNow;
         var updated = await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
         {
@@ -217,6 +223,7 @@ public sealed class FileStorageService(
             existing.ContentType = file.ContentType;
             existing.IvBase64 = file.IvBase64;
             existing.EncryptionMethod = file.EncryptionMethod;
+            existing.StoredFileSize = file.StoredFileSize;
             existing.UpdatedAt = file.UpdatedAt;
         }));
 
@@ -250,7 +257,7 @@ public sealed class FileStorageService(
         var isNewNone = newMethod == EncryptionMethod.None;
         var newRelativePath = isNewNone ? originalFileName : $"{newFileId}.enc";
 
-        var (newIv, newStoragePath) = await PipeTransformAsync(
+        var (newIv, newStoragePath, storedSize) = await PipeTransformAsync(
             storage, connection, file.StoragePath,
             oldEncryption, masterKey, iv,
             newEncryption, masterKey,
@@ -264,6 +271,7 @@ public sealed class FileStorageService(
             ? newEncryption.EncryptString(originalContentType, masterKey, newIv) : null;
         file.IvBase64 = Convert.ToBase64String(newIv);
         file.EncryptionMethod = newMethod;
+        file.StoredFileSize = storedSize;
         file.UpdatedAt = DateTimeOffset.UtcNow;
         var updated = await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
         {
@@ -272,6 +280,7 @@ public sealed class FileStorageService(
             existing.ContentType = file.ContentType;
             existing.IvBase64 = file.IvBase64;
             existing.EncryptionMethod = file.EncryptionMethod;
+            existing.StoredFileSize = file.StoredFileSize;
             existing.UpdatedAt = file.UpdatedAt;
         }));
 
@@ -328,8 +337,9 @@ public sealed class FileStorageService(
 
         // Write to new blob: compress (optional) → encrypt → backend
         var (destStream, newStoragePath) = await storage.OpenWriteAsync(connection, newRelativePath);
-        var (cryptoStream, newIv) = encryption.CreateEncryptingStream(destStream, masterKey);
-        await using (destStream)
+        var counter = new CountingStream(destStream);
+        var (cryptoStream, newIv) = encryption.CreateEncryptingStream(counter, masterKey);
+        await using (counter)
         await using (cryptoStream)
         {
             if (compress)
@@ -351,6 +361,7 @@ public sealed class FileStorageService(
             ? encryption.EncryptString(originalContentType, masterKey, newIv) : null;
         file.IvBase64 = Convert.ToBase64String(newIv);
         file.IsCompressed = compress;
+        file.StoredFileSize = counter.BytesWritten;
         file.UpdatedAt = DateTimeOffset.UtcNow;
         var updated = await FileDal.Update(file.Id, (Action<EncryptedFile>)(existing =>
         {
@@ -359,6 +370,7 @@ public sealed class FileStorageService(
             existing.ContentType = file.ContentType;
             existing.IvBase64 = file.IvBase64;
             existing.IsCompressed = file.IsCompressed;
+            existing.StoredFileSize = file.StoredFileSize;
             existing.UpdatedAt = file.UpdatedAt;
         }));
 
@@ -370,7 +382,7 @@ public sealed class FileStorageService(
     /// Streams data from an existing backend blob through a decrypt→encrypt pipe into a new blob.
     /// Never buffers the entire file in memory.
     /// </summary>
-    private static async Task<(byte[] newIv, string newStoragePath)> PipeTransformAsync(
+    private static async Task<(byte[] newIv, string newStoragePath, long storedSize)> PipeTransformAsync(
         IBackendStorageProvider storage,
         BackendConnectionInfo connection,
         string oldStoragePath,
@@ -383,13 +395,14 @@ public sealed class FileStorageService(
         await using (decryptedStream)
         {
             var (destStream, newStoragePath) = await storage.OpenWriteAsync(connection, newRelativePath);
-            var (cryptoStream, newIv) = newEncryption.CreateEncryptingStream(destStream, newMasterKey);
-            await using (destStream)
+            var counter = new CountingStream(destStream);
+            var (cryptoStream, newIv) = newEncryption.CreateEncryptingStream(counter, newMasterKey);
+            await using (counter)
             await using (cryptoStream)
             {
                 await decryptedStream.CopyToAsync(cryptoStream);
             }
-            return (newIv, newStoragePath);
+            return (newIv, newStoragePath, counter.BytesWritten);
         }
     }
 

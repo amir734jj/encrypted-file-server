@@ -238,6 +238,7 @@ using (var scope = app.Services.CreateScope())
         "ALTER TABLE \"EncryptedFiles\" ADD COLUMN IF NOT EXISTS \"EncryptionMethod\" integer",
         "ALTER TABLE \"DataSources\" ADD COLUMN IF NOT EXISTS \"BackendUseCompression\" boolean NOT NULL DEFAULT false",
         "ALTER TABLE \"EncryptedFiles\" ADD COLUMN IF NOT EXISTS \"IsCompressed\" boolean NOT NULL DEFAULT false",
+        "ALTER TABLE \"EncryptedFiles\" ADD COLUMN IF NOT EXISTS \"StoredFileSize\" bigint NOT NULL DEFAULT 0",
     };
     foreach (var sql in patches)
     {
