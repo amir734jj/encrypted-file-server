@@ -51,7 +51,7 @@ public sealed class FilesController(
             {
                 var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
                 var iv = Convert.FromBase64String(f.IvBase64);
-                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv).TrimStart('/');
                 var contentType = f.ContentType is not null
                     ? encryption.DecryptString(f.ContentType, masterKey, iv) : null;
                 decrypted.Add((f, fullPath, contentType));
@@ -133,7 +133,7 @@ public sealed class FilesController(
             {
                 var enc = encryptionFactory.GetProvider(ef.EncryptionMethod ?? defaultMethod);
                 var iv = Convert.FromBase64String(ef.IvBase64);
-                var decryptedName = enc.DecryptString(ef.OriginalFileName, masterKey, iv);
+                var decryptedName = enc.DecryptString(ef.OriginalFileName, masterKey, iv).TrimStart('/');
                 if (string.Equals(decryptedName, fullPath, StringComparison.OrdinalIgnoreCase))
                 {
                     await fileStorage.DeleteFileAsync(ef);
@@ -239,7 +239,7 @@ public sealed class FilesController(
             {
                 var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
                 var iv = Convert.FromBase64String(f.IvBase64);
-                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv).TrimStart('/');
                 return fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase);
             }
             catch
@@ -293,7 +293,7 @@ public sealed class FilesController(
             {
                 var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
                 var iv = Convert.FromBase64String(f.IvBase64);
-                fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv);
+                fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv).TrimStart('/');
             }
             catch
             {
