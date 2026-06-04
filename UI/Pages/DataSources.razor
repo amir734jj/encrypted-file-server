@@ -455,7 +455,7 @@ else
 
     private async Task DeleteDataSource(DataSourceDto ds)
     {
-        var confirmed = await MessageBox.ConfirmAsync($"Delete '{ds.Name}' and all its files?");
+        var confirmed = await MessageBox.ConfirmAsync($"Delete '{ds.Name}'? Files on the backend storage will not be deleted.");
         if (!confirmed)
         {
             return;
