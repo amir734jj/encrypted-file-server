@@ -90,7 +90,7 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
     private static async Task<AsyncFtpClient> ConnectAsync(BackendConnectionInfo connection, CancellationToken ct)
     {
         var client = new AsyncFtpClient(connection.Host, connection.Username, connection.Password, connection.Port);
-        client.Config.DataConnectionType = FtpDataConnectionType.AutoActive;
+        client.Config.DataConnectionType = FtpDataConnectionType.AutoPassive;
         if (connection.UseSsl)
         {
             client.Config.EncryptionMode = FtpEncryptionMode.Explicit;
