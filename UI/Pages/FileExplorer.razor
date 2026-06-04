@@ -46,11 +46,7 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : "Files")</h3>
     <div class="d-flex gap-2">
-        <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true" OnClick="DiscoverFiles" Enabled="@(!_discovering)">
-            @if (_discovering)
-            {
-                <span class="spinner-border spinner-border-sm me-1"></span>
-            }
+        <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true" OnClick="DiscoverFiles">
             <i class="bi bi-search me-1"></i> Discover Files
         </HxButton>
         <InputFile @key="_uploadInputKey" OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
@@ -296,7 +292,6 @@ else
     private string? _moveDestination;
     private DiscoverResult? _discoverResult;
     private HashSet<string> _selectedUntracked = new();
-    private bool _discovering;
     private bool _adopting;
 
     protected override async Task OnParametersSetAsync()
@@ -486,8 +481,6 @@ else
 
     private async Task DiscoverFiles()
     {
-        _discovering = true;
-        StateHasChanged();
         try
         {
             _discoverResult = await Api.DiscoverUntrackedAsync(DataSourceId);
@@ -496,11 +489,6 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Discovery failed: {ex.Message}");
-        }
-        finally
-        {
-            _discovering = false;
-            StateHasChanged();
         }
     }
 
