@@ -106,16 +106,26 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         using var client = await ConnectAsync(connection, ct);
         var basePath = string.IsNullOrWhiteSpace(connection.BasePath) ? "/" : connection.BasePath;
         var results = new List<(string path, long size, DateTimeOffset? modified)>();
-        await ListFtpRecursiveAsync(client, basePath, results, ct);
+
+        logger.LogInformation("FTP ListFiles starting at basePath={BasePath}, working dir={Pwd}",
+            basePath, await client.GetWorkingDirectory(ct));
+
+        await ListFtpRecursiveAsync(client, basePath, results, logger, ct);
+
+        logger.LogInformation("FTP ListFiles found {Count} files", results.Count);
         return results;
     }
 
     private static async Task ListFtpRecursiveAsync(
-        AsyncFtpClient client, string path, List<(string path, long size, DateTimeOffset? modified)> results, CancellationToken ct)
+        AsyncFtpClient client, string path, List<(string path, long size, DateTimeOffset? modified)> results,
+        ILogger logger, CancellationToken ct)
     {
         var items = await client.GetListing(path, ct);
+        logger.LogInformation("FTP GetListing({Path}) returned {Count} items", path, items.Length);
         foreach (var item in items)
         {
+            logger.LogInformation("FTP item: Type={Type}, Name={Name}, FullName={FullName}, Size={Size}",
+                item.Type, item.Name, item.FullName, item.Size);
             if (item.Type == FtpObjectType.File)
             {
                 results.Add((item.FullName, item.Size,
@@ -123,7 +133,7 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
             }
             else if (item.Type == FtpObjectType.Directory)
             {
-                await ListFtpRecursiveAsync(client, item.FullName, results, ct);
+                await ListFtpRecursiveAsync(client, item.FullName, results, logger, ct);
             }
         }
     }

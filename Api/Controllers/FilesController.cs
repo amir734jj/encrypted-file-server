@@ -19,7 +19,8 @@ public sealed class FilesController(
     IEfRepository repository,
     IFileStorageService fileStorage,
     IEncryptionProviderFactory encryptionFactory,
-    IBackendStorageProviderFactory backendStorageFactory) : ControllerBase
+    IBackendStorageProviderFactory backendStorageFactory,
+    ILogger<FilesController> logger) : ControllerBase
 {
     private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
@@ -346,6 +347,9 @@ public sealed class FilesController(
         var connection = ds.ToBackendConnectionInfo();
         var storage = backendStorageFactory.GetProvider(ds.Backend.Protocol);
 
+        logger.LogInformation("Discover: DS={DsId}, Protocol={Protocol}, Host={Host}:{Port}, BasePath={BasePath}",
+            dataSourceId, ds.Backend.Protocol, connection.Host, connection.Port, connection.BasePath);
+
         List<(string path, long size, DateTimeOffset? modified)> backendFiles;
         try
         {
@@ -353,12 +357,19 @@ public sealed class FilesController(
         }
         catch (Exception ex)
         {
+            logger.LogError(ex, "Discover: ListFilesAsync failed");
             return BadRequest($"Failed to list backend files: {ex.Message}");
         }
+
+        logger.LogInformation("Discover: Backend returned {Count} files: [{Paths}]",
+            backendFiles.Count, string.Join(", ", backendFiles.Select(f => f.path)));
 
         var trackedPaths = (await FileDal.GetAll(
             filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
             project: f => f.StoragePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        logger.LogInformation("Discover: {Count} tracked paths: [{Paths}]",
+            trackedPaths.Count, string.Join(", ", trackedPaths));
 
         var untracked = backendFiles
             .Where(f => !trackedPaths.Contains(f.path))
@@ -374,6 +385,8 @@ public sealed class FilesController(
             })
             .OrderBy(f => f.FileName)
             .ToList();
+
+        logger.LogInformation("Discover: {Count} untracked files", untracked.Count);
 
         return Ok(new DiscoverResult(untracked));
     }
