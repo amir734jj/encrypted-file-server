@@ -84,9 +84,16 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
         BackendConnectionInfo connection, CancellationToken ct = default)
     {
         using var client = Connect(connection);
-        var basePath = string.IsNullOrWhiteSpace(connection.BasePath) ? "/" : connection.BasePath;
+
+        // Use the SFTP working directory (user's home) rather than BasePath,
+        // because BasePath="/" would traverse the entire filesystem.
+        var workingDir = client.WorkingDirectory;
+        var listRoot = string.IsNullOrWhiteSpace(workingDir) || workingDir == "/"
+            ? (string.IsNullOrWhiteSpace(connection.BasePath) || connection.BasePath == "/" ? "." : connection.BasePath)
+            : workingDir;
+
         var results = new List<(string path, long size, DateTimeOffset? modified)>();
-        ListFilesRecursive(client, basePath, results);
+        ListFilesRecursive(client, listRoot, results);
         return Task.FromResult(results);
     }
 

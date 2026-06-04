@@ -104,13 +104,19 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         BackendConnectionInfo connection, CancellationToken ct = default)
     {
         using var client = await ConnectAsync(connection, ct);
-        var basePath = string.IsNullOrWhiteSpace(connection.BasePath) ? "/" : connection.BasePath;
+
+        // Use the FTP working directory (user's home) rather than BasePath,
+        // because BasePath="/" would traverse the entire filesystem.
+        var workingDir = await client.GetWorkingDirectory(ct);
+        var listRoot = string.IsNullOrWhiteSpace(workingDir) || workingDir == "/"
+            ? (string.IsNullOrWhiteSpace(connection.BasePath) || connection.BasePath == "/" ? "." : connection.BasePath)
+            : workingDir;
+
+        logger.LogInformation("FTP ListFiles: BasePath={BasePath}, WorkingDir={Pwd}, ListRoot={ListRoot}",
+            connection.BasePath, workingDir, listRoot);
+
         var results = new List<(string path, long size, DateTimeOffset? modified)>();
-
-        logger.LogInformation("FTP ListFiles starting at basePath={BasePath}, working dir={Pwd}",
-            basePath, await client.GetWorkingDirectory(ct));
-
-        await ListFtpRecursiveAsync(client, basePath, results, logger, ct);
+        await ListFtpRecursiveAsync(client, listRoot, results, logger, ct);
 
         logger.LogInformation("FTP ListFiles found {Count} files", results.Count);
         return results;
@@ -120,12 +126,20 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         AsyncFtpClient client, string path, List<(string path, long size, DateTimeOffset? modified)> results,
         ILogger logger, CancellationToken ct)
     {
-        var items = await client.GetListing(path, ct);
+        FtpListItem[] items;
+        try
+        {
+            items = await client.GetListing(path, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("FTP GetListing({Path}) failed: {Error}", path, ex.Message);
+            return;
+        }
+
         logger.LogInformation("FTP GetListing({Path}) returned {Count} items", path, items.Length);
         foreach (var item in items)
         {
-            logger.LogInformation("FTP item: Type={Type}, Name={Name}, FullName={FullName}, Size={Size}",
-                item.Type, item.Name, item.FullName, item.Size);
             if (item.Type == FtpObjectType.File)
             {
                 results.Add((item.FullName, item.Size,
