@@ -96,9 +96,33 @@ public sealed class FileStorageService(
         }
 
         Stream decrypted = encryption.CreateDecryptingStream(fileStream, masterKey, iv);
-        return ds.Backend.UseCompression
-            ? new BrotliStream(decrypted, CompressionMode.Decompress)
-            : decrypted;
+
+        if (!ds.Backend.UseCompression)
+            return decrypted;
+
+        // Buffer the decrypted content and attempt Brotli decompression.
+        // Falls back to raw content for files placed directly on the backend
+        // (not uploaded through the app) that aren't actually compressed.
+        var buffer = new MemoryStream();
+        await decrypted.CopyToAsync(buffer);
+        await decrypted.DisposeAsync();
+        buffer.Position = 0;
+
+        try
+        {
+            var decompressed = new MemoryStream();
+            await using (var brotli = new BrotliStream(buffer, CompressionMode.Decompress))
+            {
+                await brotli.CopyToAsync(decompressed);
+            }
+            decompressed.Position = 0;
+            return decompressed;
+        }
+        catch (InvalidOperationException)
+        {
+            buffer.Position = 0;
+            return buffer;
+        }
     }
 
     public async Task<Stream> OpenRawStreamAsync(DataSource ds, string relativePath)
