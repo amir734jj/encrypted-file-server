@@ -381,8 +381,10 @@ public sealed class FilesController(
                 {
                     fileName = fileName[(basePath.Length + 1)..];
                 }
+                fileName = fileName.TrimStart('/');
                 return new UntrackedFileDto(f.path, fileName, f.size, f.modified);
             })
+            .Where(f => !string.IsNullOrWhiteSpace(f.FileName))
             .OrderBy(f => f.FileName)
             .ToList();
 
@@ -425,6 +427,14 @@ public sealed class FilesController(
                 if (!string.IsNullOrEmpty(basePath) && fileName.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
                 {
                     fileName = fileName[(basePath.Length + 1)..];
+                }
+                fileName = fileName.TrimStart('/');
+
+                if (string.IsNullOrWhiteSpace(fileName))
+                {
+                    failed++;
+                    errors.Add($"{storagePath}: resolved to empty file name");
+                    continue;
                 }
 
                 var fileId = Guid.NewGuid();
