@@ -100,6 +100,24 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         return client;
     }
 
+    public async Task<List<(string path, long size, DateTimeOffset? modified)>> ListFilesAsync(
+        BackendConnectionInfo connection, CancellationToken ct = default)
+    {
+        using var client = await ConnectAsync(connection, ct);
+        var basePath = string.IsNullOrWhiteSpace(connection.BasePath) ? "/" : connection.BasePath;
+        var items = await client.GetListing(basePath, FtpListOption.Recursive, ct);
+        var results = new List<(string path, long size, DateTimeOffset? modified)>();
+        foreach (var item in items)
+        {
+            if (item.Type == FtpObjectType.File)
+            {
+                results.Add((item.FullName, item.Size,
+                    item.Modified != DateTime.MinValue ? new DateTimeOffset(item.Modified, TimeSpan.Zero) : null));
+            }
+        }
+        return results;
+    }
+
     /// <summary>Wraps an FTP write stream so the client is disposed after writing.</summary>
     private sealed class FtpWriteStream(Stream inner, AsyncFtpClient client) : Stream
     {

@@ -334,6 +334,121 @@ public sealed class FilesController(
         return Ok(new { Moved = moved });
     }
 
+    [HttpGet("discover")]
+    public async Task<IActionResult> DiscoverUntracked([FromQuery] Guid dataSourceId)
+    {
+        var ds = await GetDataSource(dataSourceId);
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
+        var connection = ds.ToBackendConnectionInfo();
+        var storage = backendStorageFactory.GetProvider(ds.Backend.Protocol);
+
+        List<(string path, long size, DateTimeOffset? modified)> backendFiles;
+        try
+        {
+            backendFiles = await storage.ListFilesAsync(connection);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Failed to list backend files: {ex.Message}");
+        }
+
+        var trackedPaths = (await FileDal.GetAll(
+            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
+            project: f => f.StoragePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var untracked = backendFiles
+            .Where(f => !trackedPaths.Contains(f.path))
+            .Select(f =>
+            {
+                var fileName = f.path;
+                var basePath = connection.BasePath?.TrimEnd('/');
+                if (!string.IsNullOrEmpty(basePath) && fileName.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    fileName = fileName[(basePath.Length + 1)..];
+                }
+                return new UntrackedFileDto(f.path, fileName, f.size, f.modified);
+            })
+            .OrderBy(f => f.FileName)
+            .ToList();
+
+        return Ok(new DiscoverResult(untracked));
+    }
+
+    [HttpPost("adopt")]
+    public async Task<IActionResult> AdoptFiles([FromBody] AdoptFilesRequest request)
+    {
+        var ds = await GetDataSource(request.DataSourceId);
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
+        var connection = ds.ToBackendConnectionInfo();
+        var storage = backendStorageFactory.GetProvider(ds.Backend.Protocol);
+        var encryption = encryptionFactory.GetProvider(EncryptionMethod.None);
+        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
+
+        var adopted = 0;
+        var failed = 0;
+        var errors = new List<string>();
+
+        foreach (var storagePath in request.StoragePaths)
+        {
+            try
+            {
+                if (!await storage.ExistsAsync(connection, storagePath))
+                {
+                    failed++;
+                    errors.Add($"{storagePath}: file not found on backend");
+                    continue;
+                }
+
+                var fileName = storagePath;
+                var basePath = connection.BasePath?.TrimEnd('/');
+                if (!string.IsNullOrEmpty(basePath) && fileName.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    fileName = fileName[(basePath.Length + 1)..];
+                }
+
+                var fileId = Guid.NewGuid();
+                var (_, iv) = encryption.CreateEncryptingStream(Stream.Null, masterKey);
+
+                var contentType = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
+                    .TryGetContentType(Path.GetFileName(fileName), out var ct) ? ct : null;
+
+                await FileDal.Save(new EncryptedFile
+                {
+                    Id = fileId,
+                    UserId = CurrentUserId,
+                    DataSourceId = request.DataSourceId,
+                    OriginalFileName = encryption.EncryptString(fileName, masterKey, iv),
+                    StoragePath = storagePath,
+                    ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
+                    OriginalFileSize = 0,
+                    StoredFileSize = 0,
+                    EncryptionMethod = EncryptionMethod.None,
+                    IsCompressed = false,
+                    IvBase64 = Convert.ToBase64String(iv),
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+
+                adopted++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                if (errors.Count < 50)
+                    errors.Add($"{storagePath}: {ex.Message}");
+            }
+        }
+
+        return Ok(new AdoptFilesResult(adopted, failed, errors));
+    }
+
     private async Task<DataSource?> GetDataSource(Guid id)
     {
         var dataSources = (await DataSourceDal.GetAll(

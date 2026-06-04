@@ -21,4 +21,10 @@ public interface IFilesApi
 
     [Post("/api/files/move-folder")]
     Task MoveFolderAsync([Query] Guid dataSourceId, [Query] string sourcePath, [Query] string destinationPath);
+
+    [Get("/api/files/discover")]
+    Task<DiscoverResult> DiscoverUntrackedAsync([Query] Guid dataSourceId);
+
+    [Post("/api/files/adopt")]
+    Task<AdoptFilesResult> AdoptFilesAsync([Body] AdoptFilesRequest request);
 }

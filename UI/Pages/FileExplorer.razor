@@ -46,6 +46,13 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : "Files")</h3>
     <div class="d-flex gap-2">
+        <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true" OnClick="DiscoverFiles" Enabled="@(!_discovering)">
+            @if (_discovering)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+            }
+            <i class="bi bi-search me-1"></i> Discover Files
+        </HxButton>
         <InputFile @key="_uploadInputKey" OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
         <label for="fileUpload" class="btn btn-primary btn-sm">
             <i class="bi bi-upload me-1"></i> Upload Files
@@ -198,6 +205,83 @@ else
     </div>
 }
 
+@if (_discoverResult is not null)
+{
+    <div class="modal show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-search me-2"></i>Discovered Untracked Files</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDiscover"></button>
+                </div>
+                <div class="modal-body">
+                    @if (_discoverResult.Files.Count == 0)
+                    {
+                        <div class="alert alert-success mb-0">
+                            <i class="bi bi-check-circle me-2"></i>No untracked files found. All files on the backend are already tracked.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span>Found <strong>@_discoverResult.Files.Count</strong> untracked file(s) on the backend storage.</span>
+                            <div>
+                                <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="ToggleSelectAll" class="me-1">
+                                    @(_selectedUntracked.Count == _discoverResult.Files.Count ? "Deselect All" : "Select All")
+                                </HxButton>
+                            </div>
+                        </div>
+                        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width: 40px;"></th>
+                                        <th>File Name</th>
+                                        <th>Size</th>
+                                        <th>Modified</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var file in _discoverResult.Files)
+                                    {
+                                        <tr @onclick="() => ToggleSelected(file.StoragePath)" class="cursor-pointer">
+                                            <td>
+                                                <input type="checkbox" checked="@_selectedUntracked.Contains(file.StoragePath)"
+                                                       @onclick:stopPropagation="true"
+                                                       @onchange="() => ToggleSelected(file.StoragePath)" />
+                                            </td>
+                                            <td>
+                                                <i class="bi bi-file-earmark me-1 text-muted"></i>
+                                                @file.FileName
+                                            </td>
+                                            <td>@FormatBytes(file.Size)</td>
+                                            <td>@(file.Modified?.LocalDateTime.ToString("MMM dd, yyyy HH:mm") ?? "—")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <HxButton Color="ThemeColor.Secondary" OnClick="CloseDiscover">Close</HxButton>
+                    @if (_discoverResult.Files.Count > 0)
+                    {
+                        <HxButton Color="ThemeColor.Primary" OnClick="AdoptSelected"
+                                  Enabled="@(_selectedUntracked.Count > 0 && !_adopting)">
+                            @if (_adopting)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            <i class="bi bi-plus-circle me-1"></i> Adopt @_selectedUntracked.Count File(s)
+                        </HxButton>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter] public Guid DataSourceId { get; set; }
     [Parameter] public string? Path { get; set; }
@@ -210,6 +294,10 @@ else
     private int _uploadInputKey;
     private FolderEntryDto? _movingFolder;
     private string? _moveDestination;
+    private DiscoverResult? _discoverResult;
+    private HashSet<string> _selectedUntracked = new();
+    private bool _discovering;
+    private bool _adopting;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -393,6 +481,81 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to move folder: {ex.Message}");
+        }
+    }
+
+    private async Task DiscoverFiles()
+    {
+        _discovering = true;
+        StateHasChanged();
+        try
+        {
+            _discoverResult = await Api.DiscoverUntrackedAsync(DataSourceId);
+            _selectedUntracked = new HashSet<string>(_discoverResult.Files.Select(f => f.StoragePath));
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Discovery failed: {ex.Message}");
+        }
+        finally
+        {
+            _discovering = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CloseDiscover()
+    {
+        _discoverResult = null;
+        _selectedUntracked.Clear();
+    }
+
+    private void ToggleSelected(string storagePath)
+    {
+        if (!_selectedUntracked.Remove(storagePath))
+        {
+            _selectedUntracked.Add(storagePath);
+        }
+    }
+
+    private void ToggleSelectAll()
+    {
+        if (_discoverResult is null) return;
+
+        if (_selectedUntracked.Count == _discoverResult.Files.Count)
+        {
+            _selectedUntracked.Clear();
+        }
+        else
+        {
+            _selectedUntracked = new HashSet<string>(_discoverResult.Files.Select(f => f.StoragePath));
+        }
+    }
+
+    private async Task AdoptSelected()
+    {
+        if (_selectedUntracked.Count == 0) return;
+
+        _adopting = true;
+        StateHasChanged();
+        try
+        {
+            var result = await Api.AdoptFilesAsync(DataSourceId, _selectedUntracked.ToList());
+            CloseDiscover();
+            await LoadAsync();
+            var msg = $"Adopted {result.Adopted} file(s).";
+            if (result.Failed > 0)
+                msg += $" {result.Failed} failed.";
+            Messenger.AddInformation(msg);
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Adopt failed: {ex.Message}");
+        }
+        finally
+        {
+            _adopting = false;
+            StateHasChanged();
         }
     }
 

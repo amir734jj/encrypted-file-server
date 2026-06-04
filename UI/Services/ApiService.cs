@@ -108,6 +108,9 @@ public sealed class ApiService(
     public Task DeleteFolderAsync(Guid dataSourceId, string path) => filesApi.DeleteFolderAsync(dataSourceId, path);
     public Task MoveFolderAsync(Guid dataSourceId, string sourcePath, string destinationPath) => filesApi.MoveFolderAsync(dataSourceId, sourcePath, destinationPath);
 
+    public Task<DiscoverResult> DiscoverUntrackedAsync(Guid dataSourceId) => filesApi.DiscoverUntrackedAsync(dataSourceId);
+    public Task<AdoptFilesResult> AdoptFilesAsync(Guid dataSourceId, List<string> storagePaths) => filesApi.AdoptFilesAsync(new AdoptFilesRequest(dataSourceId, storagePaths));
+
     public Task<GlobalConfigModel> GetGlobalConfigAsync() => globalConfigApi.GetAsync();
     public Task SaveGlobalConfigAsync(GlobalConfigModel config) => globalConfigApi.SaveAsync(config);
 

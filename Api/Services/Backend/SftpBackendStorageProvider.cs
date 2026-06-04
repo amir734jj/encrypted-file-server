@@ -80,6 +80,35 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
         return Task.FromResult(newStoragePath);
     }
 
+    public Task<List<(string path, long size, DateTimeOffset? modified)>> ListFilesAsync(
+        BackendConnectionInfo connection, CancellationToken ct = default)
+    {
+        using var client = Connect(connection);
+        var basePath = string.IsNullOrWhiteSpace(connection.BasePath) ? "/" : connection.BasePath;
+        var results = new List<(string path, long size, DateTimeOffset? modified)>();
+        ListFilesRecursive(client, basePath, results);
+        return Task.FromResult(results);
+    }
+
+    private static void ListFilesRecursive(SftpClient client, string path, List<(string path, long size, DateTimeOffset? modified)> results)
+    {
+        foreach (var item in client.ListDirectory(path))
+        {
+            if (item.Name == "." || item.Name == "..")
+                continue;
+
+            if (item.IsDirectory)
+            {
+                ListFilesRecursive(client, item.FullName, results);
+            }
+            else if (item.IsRegularFile)
+            {
+                results.Add((item.FullName, item.Length,
+                    item.LastWriteTimeUtc != DateTime.MinValue ? new DateTimeOffset(item.LastWriteTimeUtc, TimeSpan.Zero) : null));
+            }
+        }
+    }
+
     private static SftpClient Connect(BackendConnectionInfo connection)
     {
         var client = new SftpClient(connection.Host, connection.Port, connection.Username, connection.Password);
