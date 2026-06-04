@@ -44,9 +44,6 @@ else
                         <h5 class="card-title">
                             <i class="bi bi-folder-fill text-warning me-2"></i>@ds.Name
                         </h5>
-                        <p class="card-text text-muted mb-1">
-                            @ds.FileCount file(s) - @FormatBytes(ds.TotalFileSize)
-                        </p>
                         <small class="text-muted d-block">@(ds.Backend.Protocol == BackendStorageType.SftpClient ? "SFTP" : "FTP"): @ds.Backend.Host:@ds.Backend.Port</small>
                         @foreach (var fe in ds.Frontends)
                         {
@@ -88,20 +85,11 @@ else
                         <small class="text-muted">Created @ds.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")</small>
                     </div>
                     <div class="card-footer">
-                        @if (_progressMap.TryGetValue(ds.Id, out var prog))
-                        {
-                            <div class="d-flex align-items-center mb-2">
-                                <div class="spinner-border spinner-border-sm text-info me-2" role="status"></div>
-                                <span class="text-info small">@prog.Operation: @prog.Processed / @prog.TotalFiles file(s)…</span>
-                            </div>
-                        }
                         <div class="d-flex gap-2 flex-wrap align-items-center">
-                        <HxButton Color="ThemeColor.Primary" Size="ButtonSize.Small" OnClick="() => BrowseDataSource(ds.Id)"
-                                  Enabled="@(!_progressMap.ContainsKey(ds.Id))">
+                        <HxButton Color="ThemeColor.Primary" Size="ButtonSize.Small" OnClick="() => BrowseDataSource(ds.Id)">
                             <i class="bi bi-folder2-open me-1"></i> Browse
                         </HxButton>
-                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="() => ShowEditModal(ds)"
-                                  Enabled="@(!_progressMap.ContainsKey(ds.Id))">
+                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" OnClick="() => ShowEditModal(ds)">
                             <i class="bi bi-pencil me-1"></i> Edit
                         </HxButton>
                         @if (ds.Backend.EncryptionMethod != EncryptionMethod.None)
@@ -112,37 +100,15 @@ else
                                 <i class="bi bi-eye me-1"></i> Show Password
                             </HxButton>
                         }
-                        <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small" Outline="true"
-                                  OnClick="() => DecryptDataSource(ds)" title="Decrypt all files"
-                                  Enabled="@(ds.Backend.EncryptionMethod != EncryptionMethod.None && !_progressMap.ContainsKey(ds.Id))">
-                            <i class="bi bi-unlock me-1"></i> Decrypt All
-                        </HxButton>
-                        <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" Outline="true"
-                                  OnClick="() => ShowReEncryptDsModal(ds)" title="Re-encrypt all files"
-                                  Enabled="@(!_progressMap.ContainsKey(ds.Id))">
-                            <i class="bi bi-shield-lock me-1"></i> Re-encrypt All
-                        </HxButton>
-                        <HxButton Color="ThemeColor.Success" Size="ButtonSize.Small" Outline="true"
-                                  OnClick="() => CompressDataSource(ds)" title="Compress all files"
-                                  Enabled="@(!ds.Backend.UseCompression && !_progressMap.ContainsKey(ds.Id))">
-                            <i class="bi bi-file-zip me-1"></i> Compress All
-                        </HxButton>
-                        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" Outline="true"
-                                  OnClick="() => DecompressDataSource(ds)" title="Decompress all files"
-                                  Enabled="@(ds.Backend.UseCompression && !_progressMap.ContainsKey(ds.Id))">
-                            <i class="bi bi-file-earmark me-1"></i> Decompress All
-                        </HxButton>
                         <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" Outline="true"
                                   OnClick="() => DuplicateDataSource(ds)">
                             <i class="bi bi-copy me-1"></i> Duplicate
                         </HxButton>
                         <HxButton Color="ThemeColor.Info" Size="ButtonSize.Small"
-                                  OnClick="@(() => Nav.NavigateTo("/import/" + ds.Id))"
-                                  Enabled="@(!_progressMap.ContainsKey(ds.Id))">
+                                  OnClick="@(() => Nav.NavigateTo("/import/" + ds.Id))">
                             <i class="bi bi-cloud-download me-1"></i> Import Remote
                         </HxButton>
-                        <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)"
-                                  Enabled="@(!_progressMap.ContainsKey(ds.Id))">
+                        <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="() => DeleteDataSource(ds)">
                             <i class="bi bi-trash me-1"></i> Delete
                         </HxButton>
                         </div>
@@ -164,7 +130,7 @@ else
             <label class="form-label">Encryption Method</label>
             @if (_editId.HasValue)
             {
-                <div class="text-muted small"><i class="bi bi-lock me-1"></i>@_encryptionMethod — use Re-encrypt to change.</div>
+                <div class="text-muted small"><i class="bi bi-lock me-1"></i>@_encryptionMethod (cannot be changed after creation)</div>
             }
             else
             {
@@ -285,39 +251,11 @@ else
     </FooterTemplate>
 </HxModal>
 
-<HxModal @ref="_reEncryptDsModal" Title="Re-encrypt Data Source">
-    <BodyTemplate>
-        @if (_reEncryptingDs is not null)
-        {
-            <p>Re-encrypt all files in <strong>@_reEncryptingDs.Name</strong> (<strong>@_reEncryptingDs.FileCount</strong> file(s)).</p>
-            <p class="text-muted small">Each file is streamed through decrypt → re-encrypt without loading it fully into memory.</p>
-            <div class="mb-3">
-                <label class="form-label">Target Encryption</label>
-                <select class="form-select" @bind="_dsReEncryptMethod">
-                    <option value="@EncryptionMethod.None">None (plaintext)</option>
-                    <option value="@EncryptionMethod.AesCtr256">AES-CTR-256</option>
-                    <option value="@EncryptionMethod.AesGcm256">AES-GCM-256</option>
-                    <option value="@EncryptionMethod.ChaCha20Poly1305">ChaCha20-Poly1305</option>
-                </select>
-            </div>
-        }
-    </BodyTemplate>
-    <FooterTemplate>
-        <HxButton Color="ThemeColor.Secondary" OnClick="() => _reEncryptDsModal.HideAsync()">Cancel</HxButton>
-        <HxButton Color="ThemeColor.Warning" OnClick="ReEncryptDataSource">Re-encrypt All</HxButton>
-    </FooterTemplate>
-</HxModal>
-
 @code {
     private List<DataSourceDto>? _dataSources;
     private HxModal _modal = null!;
-    private HxModal _reEncryptDsModal = null!;
-    private DataSourceDto? _reEncryptingDs;
-    private EncryptionMethod _dsReEncryptMethod = EncryptionMethod.AesCtr256;
     private Guid? _editId;
-    private readonly Dictionary<Guid, BulkOperationProgress> _progressMap = [];
     private readonly Dictionary<Guid, string> _revealedPasswords = [];
-    private CancellationTokenSource? _pollCts;
 
     // Form fields
     private string _name = string.Empty;
@@ -346,7 +284,6 @@ else
         }
 
         await LoadAsync();
-        await CheckRunningOpsAsync();
     }
 
     private async Task LoadAsync()
@@ -360,59 +297,6 @@ else
             Messenger.AddError($"Failed to load data sources: {ex.Message}");
             _dataSources = [];
         }
-    }
-
-    private async Task CheckRunningOpsAsync()
-    {
-        if (_dataSources is null) return;
-
-        foreach (var ds in _dataSources)
-        {
-            try
-            {
-                var progress = await Api.GetDataSourceProgressAsync(ds.Id);
-                if (progress is not null)
-                {
-                    _progressMap[ds.Id] = progress;
-                    StartPolling(ds.Id);
-                }
-            }
-            catch { /* ignore */ }
-        }
-    }
-
-    private void StartPolling(Guid dsId)
-    {
-        _pollCts ??= new CancellationTokenSource();
-        var ct = _pollCts.Token;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                while (!ct.IsCancellationRequested)
-                {
-                    await Task.Delay(1500, ct);
-                    try
-                    {
-                        var progress = await Api.GetDataSourceProgressAsync(dsId);
-                        if (progress is null)
-                        {
-                            _progressMap.Remove(dsId);
-                            await InvokeAsync(async () =>
-                            {
-                                await LoadAsync();
-                                StateHasChanged();
-                            });
-                            break;
-                        }
-                        _progressMap[dsId] = progress;
-                        await InvokeAsync(StateHasChanged);
-                    }
-                    catch { break; }
-                }
-            }
-            catch (OperationCanceledException) { }
-        });
     }
 
     private async Task ShowCreateModal()
@@ -599,139 +483,6 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to retrieve master password: {ex.Message}");
-        }
-    }
-
-    private async Task DecryptDataSource(DataSourceDto ds)
-    {
-        var confirmed = await MessageBox.ConfirmAsync($"Decrypt all {ds.FileCount} file(s) in '{ds.Name}'? This removes encryption from every file.");
-        if (!confirmed)
-        {
-            return;
-        }
-
-        _progressMap[ds.Id] = new BulkOperationProgress("Decrypt", ds.FileCount, 0);
-        StateHasChanged();
-        StartPolling(ds.Id);
-        try
-        {
-            var result = await Api.DecryptDataSourceAsync(ds.Id);
-            Messenger.AddInformation($"Decrypted {result.Processed}/{result.TotalFiles} file(s).");
-        }
-        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
-        {
-            Messenger.AddWarning("A bulk operation is already running for this data source.");
-        }
-        catch (Exception ex)
-        {
-            Messenger.AddError($"Bulk decrypt failed: {ex.Message}");
-        }
-        finally
-        {
-            _progressMap.Remove(ds.Id);
-            await LoadAsync();
-        }
-    }
-
-    private async Task ShowReEncryptDsModal(DataSourceDto ds)
-    {
-        _reEncryptingDs = ds;
-        _dsReEncryptMethod = EncryptionMethod.AesCtr256;
-        await _reEncryptDsModal.ShowAsync();
-    }
-
-    private async Task ReEncryptDataSource()
-    {
-        if (_reEncryptingDs is null)
-        {
-            return;
-        }
-
-        var dsId = _reEncryptingDs.Id;
-        await _reEncryptDsModal.HideAsync();
-
-        _progressMap[dsId] = new BulkOperationProgress("Re-encrypt", _reEncryptingDs.FileCount, 0);
-        StateHasChanged();
-        StartPolling(dsId);
-        try
-        {
-            var result = await Api.ReEncryptDataSourceAsync(dsId, _dsReEncryptMethod);
-            Messenger.AddInformation($"Re-encrypted {result.Processed}/{result.TotalFiles} file(s) to {_dsReEncryptMethod}.");
-        }
-        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
-        {
-            Messenger.AddWarning("A bulk operation is already running for this data source.");
-        }
-        catch (Exception ex)
-        {
-            Messenger.AddError($"Bulk re-encrypt failed: {ex.Message}");
-        }
-        finally
-        {
-            _progressMap.Remove(dsId);
-            await LoadAsync();
-        }
-    }
-
-    private async Task CompressDataSource(DataSourceDto ds)
-    {
-        var confirmed = await MessageBox.ConfirmAsync($"Compress all {ds.FileCount} file(s) in '{ds.Name}'? This rewrites every file with Brotli compression.");
-        if (!confirmed)
-        {
-            return;
-        }
-
-        _progressMap[ds.Id] = new BulkOperationProgress("Compress", ds.FileCount, 0);
-        StateHasChanged();
-        StartPolling(ds.Id);
-        try
-        {
-            var result = await Api.CompressDataSourceAsync(ds.Id);
-            Messenger.AddInformation($"Compressed {result.Processed}/{result.TotalFiles} file(s).");
-        }
-        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
-        {
-            Messenger.AddWarning("A bulk operation is already running for this data source.");
-        }
-        catch (Exception ex)
-        {
-            Messenger.AddError($"Bulk compress failed: {ex.Message}");
-        }
-        finally
-        {
-            _progressMap.Remove(ds.Id);
-            await LoadAsync();
-        }
-    }
-
-    private async Task DecompressDataSource(DataSourceDto ds)
-    {
-        var confirmed = await MessageBox.ConfirmAsync($"Decompress all {ds.FileCount} file(s) in '{ds.Name}'? This rewrites every file without compression.");
-        if (!confirmed)
-        {
-            return;
-        }
-
-        _progressMap[ds.Id] = new BulkOperationProgress("Decompress", ds.FileCount, 0);
-        StateHasChanged();
-        StartPolling(ds.Id);
-        try
-        {
-            var result = await Api.DecompressDataSourceAsync(ds.Id);
-            Messenger.AddInformation($"Decompressed {result.Processed}/{result.TotalFiles} file(s).");
-        }
-        catch (Refit.ApiException apiEx) when (apiEx.StatusCode == System.Net.HttpStatusCode.Conflict)
-        {
-            Messenger.AddWarning("A bulk operation is already running for this data source.");
-        }
-        catch (Exception ex)
-        {
-            Messenger.AddError($"Bulk decompress failed: {ex.Message}");
-        }
-        finally
-        {
-            _progressMap.Remove(ds.Id);
-            await LoadAsync();
         }
     }
 

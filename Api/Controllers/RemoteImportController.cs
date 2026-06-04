@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
 using Api.Services;
+using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Contracts;
@@ -53,17 +55,19 @@ public sealed class RemoteImportController(
 
         CompletedImports.TryRemove(dataSourceId, out _);
 
-        var userId = CurrentUserId;
-
         _ = Task.Run(async () =>
         {
             try
             {
                 using var scope = scopeFactory.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<IRemoteImportService>();
+                var repo = scope.ServiceProvider.GetRequiredService<IEfRepository>();
+                var ds = (await repo.For<DataSource>().GetAll(
+                    filterExprs: [d => d.Id == dataSourceId], project: d => d)).FirstOrDefault();
+                if (ds is null) throw new InvalidOperationException($"DataSource {dataSourceId} not found");
 
                 var result = await svc.ImportAsync(
-                    userId, dataSourceId, request,
+                    ds, request,
                     progress => RunningImports[dataSourceId] = progress);
 
                 CompletedImports[dataSourceId] = result;

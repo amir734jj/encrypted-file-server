@@ -2,7 +2,6 @@ using System.Text;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
-using Api.Services;
 using Api.ViewModels;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Identity;
@@ -20,7 +19,6 @@ public sealed class RawBrowseController(
     UserManager<User> userManager) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
-    private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private IBasicCrud<AccessTicket> TicketDal => repository.For<AccessTicket>();
 
     [HttpGet]
@@ -64,49 +62,31 @@ public sealed class RawBrowseController(
         }
 
         path = NormalizePath(path);
+        var trimmedPath = path.TrimEnd('/');
 
-        // If path ends with a GUID, serve the raw file
-        if (TryParseFileId(path, out var fileId))
+        // If path points to a file, serve raw bytes
+        if (!string.IsNullOrEmpty(trimmedPath))
         {
-            var matchFiles = (await FileDal.GetAll(
-                filterExprs: [f => f.Id == fileId && f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
-                project: f => f,
-                maxResults: 1)).ToList();
-
-            if (matchFiles.Count > 0)
+            if (await fileStorage.ExistsAsync(ds!, trimmedPath))
             {
-                var file = matchFiles.First();
-                var rawStream = await fileStorage.OpenRawStreamAsync(file);
-                var rawFileName = System.IO.Path.GetFileName(file.StoragePath);
+                var rawStream = await fileStorage.OpenRawStreamAsync(ds!, trimmedPath);
+                var rawFileName = System.IO.Path.GetFileName(trimmedPath);
                 return File(rawStream, "application/octet-stream", rawFileName);
             }
         }
 
-        // Directory listing — show raw storage paths
-        var allFiles = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
-            project: f => f)).ToList();
-
-        var entries = new List<EntryViewModel>();
-
-        foreach (var f in allFiles)
-        {
-            var storageName = System.IO.Path.GetFileName(f.StoragePath);
-            if (string.IsNullOrEmpty(storageName))
+        // Directory listing
+        var backendFiles = await fileStorage.ListFilesAsync(ds!);
+        var entries = backendFiles
+            .Select(f => new EntryViewModel
             {
-                storageName = f.Id.ToString();
-            }
-
-            entries.Add(new EntryViewModel
-            {
-                Name = storageName,
-                Href = $"/raw/{dataSourceId}/{f.Id}",
-                Size = f.StoredFileSize > 0 ? f.StoredFileSize : f.OriginalFileSize,
-                Modified = f.CreatedAt
-            });
-        }
-
-        entries = entries.OrderBy(e => e.Name).ToList();
+                Name = System.IO.Path.GetFileName(f.Path) ?? f.Path,
+                Href = $"/raw/{dataSourceId}/{f.Path}",
+                Size = f.StoredSize,
+                Modified = f.Modified ?? DateTimeOffset.UtcNow
+            })
+            .OrderBy(e => e.Name)
+            .ToList();
 
         var displayPath = $"/{ds!.Name}/ (raw)";
         var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
@@ -245,16 +225,15 @@ public sealed class RawBrowseController(
             return string.Empty;
         }
 
-        path = path.Replace('\\', '/').Trim('/');
-        return path.Length > 0 ? path + "/" : string.Empty;
-    }
+        var segments = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var stack = new Stack<string>();
+        foreach (var seg in segments)
+        {
+            if (seg == "..") { if (stack.Count > 0) stack.Pop(); }
+            else if (seg != ".") stack.Push(seg);
+        }
 
-    private static bool TryParseFileId(string path, out Guid fileId)
-    {
-        fileId = Guid.Empty;
-        var trimmed = path.TrimEnd('/');
-        var lastSlash = trimmed.LastIndexOf('/');
-        var segment = lastSlash < 0 ? trimmed : trimmed[(lastSlash + 1)..];
-        return Guid.TryParse(segment, out fileId);
+        var resolved = string.Join("/", stack.Reverse());
+        return resolved.Length > 0 ? resolved + "/" : string.Empty;
     }
 }

@@ -1,3 +1,4 @@
+using Api.Data.Entities;
 using Api.Interfaces;
 using FluentFTP;
 using Microsoft.AspNetCore.StaticFiles;
@@ -12,7 +13,7 @@ public interface IRemoteImportService
     Task<RemoteBrowseResponse> BrowseAsync(RemoteBrowseRequest request, CancellationToken ct = default);
 
     Task<RemoteImportResult> ImportAsync(
-        Guid userId, Guid dataSourceId, RemoteImportRequest request,
+        DataSource dataSource, RemoteImportRequest request,
         Action<BulkOperationProgress>? onProgress = null, CancellationToken ct = default);
 }
 
@@ -32,7 +33,7 @@ public sealed class RemoteImportService(IFileStorageService fileStorage) : IRemo
     }
 
     public async Task<RemoteImportResult> ImportAsync(
-        Guid userId, Guid dataSourceId, RemoteImportRequest request,
+        DataSource dataSource, RemoteImportRequest request,
         Action<BulkOperationProgress>? onProgress = null, CancellationToken ct = default)
     {
         var conn = request.Connection;
@@ -55,7 +56,6 @@ public sealed class RemoteImportService(IFileStorageService fileStorage) : IRemo
             ct.ThrowIfCancellationRequested();
             try
             {
-                // Compute relative path from the import root
                 var relativePath = filePath;
                 if (remotePath != "/" && filePath.StartsWith(remotePath, StringComparison.OrdinalIgnoreCase))
                 {
@@ -66,13 +66,13 @@ public sealed class RemoteImportService(IFileStorageService fileStorage) : IRemo
                 var contentType = InferContentType(Path.GetFileName(filePath));
 
                 await using var stream = await OpenRemoteReadAsync(conn, filePath, ct);
-                await fileStorage.StoreFileAsync(userId, dataSourceId, storageName, contentType, stream);
+                await fileStorage.StoreFileAsync(dataSource, storageName, contentType, stream);
                 imported++;
             }
             catch (Exception ex)
             {
                 failed++;
-                if (errors.Count < 50) // cap error list
+                if (errors.Count < 50)
                     errors.Add($"{filePath}: {ex.Message}");
             }
 

@@ -1,14 +1,11 @@
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
-using Api.Services.Backend;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
 using Shared.Contracts;
-using Shared.Interfaces;
-using Shared.Models;
 
 namespace Api.Controllers;
 
@@ -17,14 +14,11 @@ namespace Api.Controllers;
 [Authorize]
 public sealed class FilesController(
     IEfRepository repository,
-    IFileStorageService fileStorage,
-    IEncryptionProviderFactory encryptionFactory,
-    IBackendStorageProviderFactory backendStorageFactory,
-    ILogger<FilesController> logger) : ControllerBase
+    IFileStorageService fileStorage) : ControllerBase
 {
-    private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private Guid CurrentUserId => User.GetUserId();
+    private static readonly FileExtensionContentTypeProvider MimeMap = new();
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] Guid dataSourceId, [FromQuery] string path = "")
@@ -35,62 +29,42 @@ public sealed class FilesController(
             return NotFound();
         }
 
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var defaultMethod = ds.Backend.EncryptionMethod;
-
         path = NormalizePath(path);
 
-        var allFiles = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
-            project: f => f)).ToList();
-
-        var decrypted = new List<(EncryptedFile file, string fullPath, string? contentType)>();
-        foreach (var f in allFiles)
-        {
-            try
-            {
-                var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-                var iv = Convert.FromBase64String(f.IvBase64);
-                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv).TrimStart('/');
-                var contentType = f.ContentType is not null
-                    ? encryption.DecryptString(f.ContentType, masterKey, iv) : null;
-                decrypted.Add((f, fullPath, contentType));
-            }
-            catch
-            {
-                // Skip files that can't be decrypted (corrupt IV, wrong key, etc.)
-            }
-        }
+        var backendFiles = await fileStorage.ListFilesAsync(ds);
 
         var files = new List<FileEntryDto>();
         var subfolders = new Dictionary<string, (int count, long size)>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (file, fullPath, contentType) in decrypted)
+        foreach (var f in backendFiles)
         {
-            if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+            var filePath = f.Path;
+            if (!string.IsNullOrEmpty(path) &&
+                !filePath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var relativePath = fullPath[path.Length..];
+            var relativePath = string.IsNullOrEmpty(path) ? filePath : filePath[path.Length..];
             var slashIndex = relativePath.IndexOf('/');
 
             if (slashIndex < 0)
             {
+                MimeMap.TryGetContentType(relativePath, out var contentType);
                 files.Add(new FileEntryDto(
-                    file.Id, file.DataSourceId, relativePath, contentType,
-                    file.OriginalFileSize, file.CreatedAt, file.UpdatedAt));
+                    dataSourceId, relativePath, contentType,
+                    f.StoredSize, f.Modified));
             }
             else
             {
                 var folderName = relativePath[..slashIndex];
                 if (subfolders.TryGetValue(folderName, out var existing))
                 {
-                    subfolders[folderName] = (existing.count + 1, existing.size + file.OriginalFileSize);
+                    subfolders[folderName] = (existing.count + 1, existing.size + f.StoredSize);
                 }
                 else
                 {
-                    subfolders[folderName] = (1, file.OriginalFileSize);
+                    subfolders[folderName] = (1, f.StoredSize);
                 }
             }
         }
@@ -111,8 +85,8 @@ public sealed class FilesController(
             return BadRequest("No file provided.");
         }
 
-        var dsExists = await DataSourceDal.Any(filterExprs: [d => d.Id == dataSourceId && d.UserId == CurrentUserId]);
-        if (!dsExists)
+        var ds = await GetDataSource(dataSourceId);
+        if (ds is null)
         {
             return NotFound("Data source not found.");
         }
@@ -121,93 +95,65 @@ public sealed class FilesController(
         var fullPath = path + file.FileName;
 
         // Delete existing file with the same name (replace semantics)
-        var ds = (await GetDataSource(dataSourceId))!;
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var defaultMethod = ds.Backend.EncryptionMethod;
-        var existingFiles = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
-            project: f => f)).ToList();
-        foreach (var ef in existingFiles)
+        if (await fileStorage.ExistsAsync(ds, fullPath))
         {
-            try
-            {
-                var enc = encryptionFactory.GetProvider(ef.EncryptionMethod ?? defaultMethod);
-                var iv = Convert.FromBase64String(ef.IvBase64);
-                var decryptedName = enc.DecryptString(ef.OriginalFileName, masterKey, iv).TrimStart('/');
-                if (string.Equals(decryptedName, fullPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    await fileStorage.DeleteFileAsync(ef);
-                    break;
-                }
-            }
-            catch { /* skip corrupt entries */ }
+            await fileStorage.DeleteFileAsync(ds, fullPath);
         }
 
         await using var stream = file.OpenReadStream();
-        var entity = await fileStorage.StoreFileAsync(
-            CurrentUserId, dataSourceId, fullPath, file.ContentType, stream);
+        await fileStorage.StoreFileAsync(ds, fullPath, file.ContentType, stream);
 
-        var encryption = encryptionFactory.GetProvider(entity.EncryptionMethod ?? ds.Backend.EncryptionMethod);
-        var entityIv = Convert.FromBase64String(entity.IvBase64);
+        MimeMap.TryGetContentType(file.FileName, out var contentType);
 
         return Ok(new FileEntryDto(
-            entity.Id, entity.DataSourceId,
-            encryption.DecryptString(entity.OriginalFileName, masterKey, entityIv),
-            entity.ContentType is not null ? encryption.DecryptString(entity.ContentType, masterKey, entityIv) : null,
-            entity.OriginalFileSize, entity.CreatedAt, entity.UpdatedAt));
+            dataSourceId, file.FileName, contentType ?? file.ContentType,
+            file.Length, DateTimeOffset.UtcNow));
     }
 
-    [HttpGet("{id:guid}/download")]
-    public async Task<IActionResult> Download(Guid id)
+    [HttpGet("download")]
+    public async Task<IActionResult> Download([FromQuery] Guid dataSourceId, [FromQuery] string path)
     {
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.Id == id && f.UserId == CurrentUserId],
-            project: f => f,
-            maxResults: 1)).ToList();
-        if (files.Count == 0)
+        if (string.IsNullOrWhiteSpace(path))
         {
-            return NotFound();
+            return BadRequest("Path is required.");
         }
 
-        var file = files.First();
-        var ds = await GetDataSource(file.DataSourceId);
+        var ds = await GetDataSource(dataSourceId);
         if (ds is null)
         {
             return NotFound();
         }
 
-        var encryption = encryptionFactory.GetProvider(file.EncryptionMethod ?? ds.Backend.EncryptionMethod);
-
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var iv = Convert.FromBase64String(file.IvBase64);
-        var stream = await fileStorage.OpenDecryptedStreamAsync(file);
-        var fullPath = encryption.DecryptString(file.OriginalFileName, masterKey, iv);
-        var fileName = Path.GetFileName(fullPath);
-        var contentType = file.ContentType is not null
-            ? encryption.DecryptString(file.ContentType, masterKey, iv)
-            : "application/octet-stream";
-        if (contentType == "application/octet-stream")
-        {
-            if (new FileExtensionContentTypeProvider().TryGetContentType(fileName, out var inferred))
-                contentType = inferred;
-        }
-
-        return File(stream, contentType, fileName);
-    }
-
-    [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id)
-    {
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.Id == id && f.UserId == CurrentUserId],
-            project: f => f,
-            maxResults: 1)).ToList();
-        if (files.Count == 0)
+        path = NormalizePath(path).TrimEnd('/');
+        if (!await fileStorage.ExistsAsync(ds, path))
         {
             return NotFound();
         }
 
-        await fileStorage.DeleteFileAsync(files.First());
+        var stream = await fileStorage.OpenDecryptedStreamAsync(ds, path);
+        var fileName = Path.GetFileName(path);
+        MimeMap.TryGetContentType(fileName, out var contentType);
+        contentType ??= "application/octet-stream";
+
+        return File(stream, contentType, fileName);
+    }
+
+    [HttpDelete]
+    public async Task<IActionResult> Delete([FromQuery] Guid dataSourceId, [FromQuery] string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return BadRequest("Path is required.");
+        }
+
+        var ds = await GetDataSource(dataSourceId);
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
+        path = NormalizePath(path).TrimEnd('/');
+        await fileStorage.DeleteFileAsync(ds, path);
         return NoContent();
     }
 
@@ -226,38 +172,23 @@ public sealed class FilesController(
             return NotFound();
         }
 
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var defaultMethod = ds.Backend.EncryptionMethod;
-
-        var allFiles = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
-            project: f => f)).ToList();
-
+        var allFiles = await fileStorage.ListFilesAsync(ds);
         var toDelete = allFiles.Where(f =>
-        {
-            try
-            {
-                var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-                var iv = Convert.FromBase64String(f.IvBase64);
-                var fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv).TrimStart('/');
-                return fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
-        }).ToList();
+            f.Path.StartsWith(path, StringComparison.OrdinalIgnoreCase)).ToList();
 
         foreach (var file in toDelete)
         {
-            await fileStorage.DeleteFileAsync(file);
+            await fileStorage.DeleteFileAsync(ds, file.Path);
         }
 
         return Ok(new { Deleted = toDelete.Count });
     }
 
     [HttpPost("move-folder")]
-    public async Task<IActionResult> MoveFolder([FromQuery] Guid dataSourceId, [FromQuery] string sourcePath, [FromQuery] string destinationPath)
+    public async Task<IActionResult> MoveFolder(
+        [FromQuery] Guid dataSourceId,
+        [FromQuery] string sourcePath,
+        [FromQuery] string destinationPath)
     {
         sourcePath = NormalizePath(sourcePath);
         destinationPath = NormalizePath(destinationPath);
@@ -278,198 +209,22 @@ public sealed class FilesController(
             return NotFound();
         }
 
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-        var defaultMethod = ds.Backend.EncryptionMethod;
-
-        var allFiles = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
-            project: f => f)).ToList();
-
+        var allFiles = await fileStorage.ListFilesAsync(ds);
         var moved = 0;
+
         foreach (var f in allFiles)
         {
-            string fullPath;
-            try
-            {
-                var encryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-                var iv = Convert.FromBase64String(f.IvBase64);
-                fullPath = encryption.DecryptString(f.OriginalFileName, masterKey, iv).TrimStart('/');
-            }
-            catch
+            if (!f.Path.StartsWith(sourcePath, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            if (!fullPath.StartsWith(sourcePath, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var encryption2 = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-            var iv2 = Convert.FromBase64String(f.IvBase64);
-            var newFullPath = destinationPath + fullPath[sourcePath.Length..];
-            var encryptedName = encryption2.EncryptString(newFullPath, masterKey, iv2);
-
-            string? newStoragePath = null;
-            if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
-            {
-                var connection = ds.ToBackendConnectionInfo();
-                newStoragePath = await backendStorageFactory.GetProvider(ds.Backend.Protocol).RenameAsync(connection, f.StoragePath, newFullPath);
-            }
-
-            var capturedEncryptedName = encryptedName;
-            var capturedStoragePath = newStoragePath;
-            await FileDal.Update(f.Id, (Action<EncryptedFile>)(existing =>
-            {
-                existing.OriginalFileName = capturedEncryptedName;
-                existing.UpdatedAt = DateTimeOffset.UtcNow;
-                if (capturedStoragePath is not null)
-                {
-                    existing.StoragePath = capturedStoragePath;
-                }
-            }));
-
+            var newPath = destinationPath + f.Path[sourcePath.Length..];
+            await fileStorage.RenameFileAsync(ds, f.Path, newPath);
             moved++;
         }
 
         return Ok(new { Moved = moved });
-    }
-
-    [HttpGet("discover")]
-    public async Task<IActionResult> DiscoverUntracked([FromQuery] Guid dataSourceId)
-    {
-        var ds = await GetDataSource(dataSourceId);
-        if (ds is null)
-        {
-            return NotFound();
-        }
-
-        var connection = ds.ToBackendConnectionInfo();
-        var storage = backendStorageFactory.GetProvider(ds.Backend.Protocol);
-
-        logger.LogInformation("Discover: DS={DsId}, Protocol={Protocol}, Host={Host}:{Port}, BasePath={BasePath}",
-            dataSourceId, ds.Backend.Protocol, connection.Host, connection.Port, connection.BasePath);
-
-        List<(string path, long size, DateTimeOffset? modified)> backendFiles;
-        try
-        {
-            backendFiles = await storage.ListFilesAsync(connection);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Discover: ListFilesAsync failed");
-            return BadRequest($"Failed to list backend files: {ex.Message}");
-        }
-
-        logger.LogInformation("Discover: Backend returned {Count} files: [{Paths}]",
-            backendFiles.Count, string.Join(", ", backendFiles.Select(f => f.path)));
-
-        var trackedPaths = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == CurrentUserId],
-            project: f => f.StoragePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        logger.LogInformation("Discover: {Count} tracked paths: [{Paths}]",
-            trackedPaths.Count, string.Join(", ", trackedPaths));
-
-        var untracked = backendFiles
-            .Where(f => !trackedPaths.Contains(f.path))
-            .Select(f =>
-            {
-                var fileName = f.path;
-                var basePath = connection.BasePath?.TrimEnd('/');
-                if (!string.IsNullOrEmpty(basePath) && fileName.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    fileName = fileName[(basePath.Length + 1)..];
-                }
-                fileName = fileName.TrimStart('/');
-                return new UntrackedFileDto(f.path, fileName, f.size, f.modified);
-            })
-            .Where(f => !string.IsNullOrWhiteSpace(f.FileName))
-            .OrderBy(f => f.FileName)
-            .ToList();
-
-        logger.LogInformation("Discover: {Count} untracked files", untracked.Count);
-
-        return Ok(new DiscoverResult(untracked));
-    }
-
-    [HttpPost("adopt")]
-    public async Task<IActionResult> AdoptFiles([FromBody] AdoptFilesRequest request)
-    {
-        var ds = await GetDataSource(request.DataSourceId);
-        if (ds is null)
-        {
-            return NotFound();
-        }
-
-        var connection = ds.ToBackendConnectionInfo();
-        var storage = backendStorageFactory.GetProvider(ds.Backend.Protocol);
-        var encryption = encryptionFactory.GetProvider(EncryptionMethod.None);
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
-
-        var adopted = 0;
-        var failed = 0;
-        var errors = new List<string>();
-
-        foreach (var storagePath in request.StoragePaths)
-        {
-            try
-            {
-                if (!await storage.ExistsAsync(connection, storagePath))
-                {
-                    failed++;
-                    errors.Add($"{storagePath}: file not found on backend");
-                    continue;
-                }
-
-                var fileName = storagePath;
-                var basePath = connection.BasePath?.TrimEnd('/');
-                if (!string.IsNullOrEmpty(basePath) && fileName.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    fileName = fileName[(basePath.Length + 1)..];
-                }
-                fileName = fileName.TrimStart('/');
-
-                if (string.IsNullOrWhiteSpace(fileName))
-                {
-                    failed++;
-                    errors.Add($"{storagePath}: resolved to empty file name");
-                    continue;
-                }
-
-                var fileId = Guid.NewGuid();
-                var (_, iv) = encryption.CreateEncryptingStream(Stream.Null, masterKey);
-
-                var contentType = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
-                    .TryGetContentType(Path.GetFileName(fileName), out var ct) ? ct : null;
-
-                await FileDal.Save(new EncryptedFile
-                {
-                    Id = fileId,
-                    UserId = CurrentUserId,
-                    DataSourceId = request.DataSourceId,
-                    OriginalFileName = encryption.EncryptString(fileName, masterKey, iv),
-                    StoragePath = storagePath,
-                    ContentType = contentType is not null ? encryption.EncryptString(contentType, masterKey, iv) : null,
-                    OriginalFileSize = 0,
-                    StoredFileSize = 0,
-                    EncryptionMethod = EncryptionMethod.None,
-                    IsCompressed = false,
-                    IvBase64 = Convert.ToBase64String(iv),
-                    CreatedAt = DateTimeOffset.UtcNow
-                });
-
-                adopted++;
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                if (errors.Count < 50)
-                    errors.Add($"{storagePath}: {ex.Message}");
-            }
-        }
-
-        return Ok(new AdoptFilesResult(adopted, failed, errors));
     }
 
     private async Task<DataSource?> GetDataSource(Guid id)

@@ -2,13 +2,11 @@ using System.Text;
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
-using Api.Services;
 using Api.ViewModels;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
-using Shared.Interfaces;
 using Shared.Models;
 
 namespace Api.Controllers;
@@ -17,12 +15,10 @@ namespace Api.Controllers;
 public sealed class BrowseController(
     IEfRepository repository,
     IFileStorageService fileStorage,
-    IEncryptionProviderFactory encryptionFactory,
     ITemplateService templateService,
     UserManager<User> userManager) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
-    private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
     private IBasicCrud<AccessTicket> TicketDal => repository.For<AccessTicket>();
     private static readonly FileExtensionContentTypeProvider MimeMap = new();
 
@@ -31,7 +27,6 @@ public sealed class BrowseController(
     {
         var userId = ResolveUserId();
 
-        // Try HTTP Basic auth via access tickets
         if (userId is null)
         {
             userId = await TryBasicAuthUserId();
@@ -65,52 +60,39 @@ public sealed class BrowseController(
     [HttpGet("{dataSourceId:guid}/{**path}")]
     public async Task<IActionResult> ListOrDownload(Guid dataSourceId, string? path = null, [FromQuery] bool raw = false)
     {
-        var (ds, masterKey, error) = await AuthorizeDataSource(dataSourceId);
+        var (ds, error) = await AuthorizeDataSource(dataSourceId);
         if (error is not null)
         {
             return error;
         }
 
-        var defaultEncryption = encryptionFactory.GetProvider(ds!.Backend.EncryptionMethod);
-        var defaultMethod = ds.Backend.EncryptionMethod;
         path = NormalizePath(path);
 
-        // If path ends with a GUID, try to serve it as a file download
-        if (TryParseFileId(path, out var fileId))
+        // Check if this is a file download (path points to an actual file)
+        var trimmedPath = path.TrimEnd('/');
+        if (!string.IsNullOrEmpty(trimmedPath))
         {
-            var matchFiles = (await FileDal.GetAll(
-                filterExprs: [f => f.Id == fileId && f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
-                project: f => f,
-                maxResults: 1)).ToList();
-            if (matchFiles.Count > 0)
-            {
-                var file = matchFiles.First();
-                var fileMethod = file.EncryptionMethod ?? defaultMethod;
-                var isFileEncrypted = fileMethod != EncryptionMethod.None;
+            // Check if the path is a file (not a directory prefix)
+            var allFiles = await fileStorage.ListFilesAsync(ds!);
+            var matchingFile = allFiles.FirstOrDefault(f =>
+                string.Equals(f.Path, trimmedPath, StringComparison.OrdinalIgnoreCase));
 
-                if (raw && isFileEncrypted)
+            if (matchingFile is not null)
+            {
+                if (raw)
                 {
-                    var rawStream = await fileStorage.OpenRawStreamAsync(file);
-                    var rawFileName = System.IO.Path.GetFileName(file.StoragePath);
+                    var rawStream = await fileStorage.OpenRawStreamAsync(ds!, trimmedPath);
+                    var rawFileName = System.IO.Path.GetFileName(trimmedPath);
                     return File(rawStream, "application/octet-stream", rawFileName);
                 }
 
-                var fileEncryption = encryptionFactory.GetProvider(fileMethod);
-                var iv = Convert.FromBase64String(file.IvBase64);
-                var fullPath = fileEncryption.DecryptString(file.OriginalFileName, masterKey!, iv);
-                var fileName = System.IO.Path.GetFileName(fullPath);
-                var contentType = file.ContentType is not null
-                    ? fileEncryption.DecryptString(file.ContentType, masterKey!, iv)
-                    : "application/octet-stream";
-                if (contentType == "application/octet-stream" &&
-                    MimeMap.TryGetContentType(fileName, out var inferred))
-                {
-                    contentType = inferred;
-                }
-                var stream = await fileStorage.OpenDecryptedStreamAsync(file);
+                var fileName = System.IO.Path.GetFileName(trimmedPath);
+                MimeMap.TryGetContentType(fileName, out var contentType);
+                contentType ??= "application/octet-stream";
 
-                // For streamable media (video/audio), Chrome requires Range request support
-                // which needs a seekable stream. Buffer to a temp file so ASP.NET can handle ranges.
+                var stream = await fileStorage.OpenDecryptedStreamAsync(ds!, trimmedPath);
+
+                // For streamable media, buffer to temp file for range request support
                 if (contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ||
                     contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
                 {
@@ -132,58 +114,45 @@ public sealed class BrowseController(
         }
 
         // Directory listing
-        var allFiles = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == dataSourceId && f.UserId == ds!.UserId],
-            project: f => f)).ToList();
-
+        var backendFiles = await fileStorage.ListFilesAsync(ds!);
         var entries = new List<EntryViewModel>();
         var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var f in allFiles)
+        foreach (var f in backendFiles)
         {
-            try
+            if (!string.IsNullOrEmpty(path) &&
+                !f.Path.StartsWith(path, StringComparison.OrdinalIgnoreCase))
             {
-                var fileEncryption = encryptionFactory.GetProvider(f.EncryptionMethod ?? defaultMethod);
-                var iv = Convert.FromBase64String(f.IvBase64);
-                var fullPath = fileEncryption.DecryptString(f.OriginalFileName, masterKey!, iv);
+                continue;
+            }
 
-                if (!fullPath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+            var relativePath = string.IsNullOrEmpty(path) ? f.Path : f.Path[path.Length..];
+            var slashIndex = relativePath.IndexOf('/');
+
+            if (slashIndex < 0)
+            {
+                var isEncrypted = ds!.Backend.EncryptionMethod != EncryptionMethod.None;
+                var href = $"/browse/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{relativePath}";
+                entries.Add(new EntryViewModel
                 {
-                    continue;
-                }
-
-                var relativePath = fullPath[path.Length..];
-                var slashIndex = relativePath.IndexOf('/');
-
-                if (slashIndex < 0)
+                    Name = relativePath,
+                    Href = href,
+                    RawHref = isEncrypted ? $"{href}?raw=true" : null,
+                    Size = f.StoredSize,
+                    Modified = f.Modified ?? DateTimeOffset.UtcNow
+                });
+            }
+            else
+            {
+                var folderName = relativePath[..slashIndex];
+                if (seenFolders.Add(folderName))
                 {
-                    var isFileEncrypted = (f.EncryptionMethod ?? defaultMethod) != EncryptionMethod.None;
-                    var href = $"/browse/{dataSourceId}/{path}{f.Id}";
                     entries.Add(new EntryViewModel
                     {
-                        Name = relativePath,
-                        Href = href,
-                        RawHref = isFileEncrypted ? $"{href}?raw=true" : null,
-                        Size = f.OriginalFileSize,
-                        Modified = f.CreatedAt
+                        Name = folderName,
+                        Href = $"/browse/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{folderName}/"
                     });
                 }
-                else
-                {
-                    var folderName = relativePath[..slashIndex];
-                    if (seenFolders.Add(folderName))
-                    {
-                        entries.Add(new EntryViewModel
-                        {
-                            Name = folderName,
-                            Href = $"/browse/{dataSourceId}/{path}{folderName}/"
-                        });
-                    }
-                }
-            }
-            catch
-            {
-                // Skip files that can't be decrypted
             }
         }
 
@@ -244,8 +213,6 @@ public sealed class BrowseController(
         }
 
         var ticket = tickets.First();
-
-        // Reject if the ticket owner's account is disabled
         var ticketOwner = await userManager.FindByIdAsync(ticket.UserId.ToString());
         if (ticketOwner is null || !ticketOwner.IsActive)
         {
@@ -255,7 +222,7 @@ public sealed class BrowseController(
         return ticket.UserId;
     }
 
-    private async Task<(DataSource? ds, byte[]? masterKey, IActionResult? error)> AuthorizeDataSource(Guid dataSourceId)
+    private async Task<(DataSource? ds, IActionResult? error)> AuthorizeDataSource(Guid dataSourceId)
     {
         var dataSources = (await DataSourceDal.GetAll(
             filterExprs: [d => d.Id == dataSourceId],
@@ -264,7 +231,7 @@ public sealed class BrowseController(
 
         if (dataSources.Count == 0)
         {
-            return (null, null, NotFound());
+            return (null, NotFound());
         }
 
         var ds = dataSources.First();
@@ -272,14 +239,12 @@ public sealed class BrowseController(
 
         if (httpFrontend is null)
         {
-            return (null, null, NotFound());
+            return (null, NotFound());
         }
-
-        var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
 
         if (httpFrontend.AllowAnonymous)
         {
-            return (ds, masterKey, null);
+            return (ds, null);
         }
 
         if (User.Identity?.IsAuthenticated == true)
@@ -287,13 +252,13 @@ public sealed class BrowseController(
             var currentUserId = User.GetUserId();
             if (currentUserId != ds.UserId)
             {
-                return (null, null, Forbid());
+                return (null, Forbid());
             }
 
-            return (ds, masterKey, null);
+            return (ds, null);
         }
 
-        // HTTP Basic auth — validate against access tickets
+        // HTTP Basic auth
         var authHeader = Request.Headers.Authorization.ToString();
         if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
@@ -313,17 +278,16 @@ public sealed class BrowseController(
 
             if (tickets.Count > 0)
             {
-                // Reject if the ticket owner's account is disabled
                 var ticketOwner = await userManager.FindByIdAsync(tickets.First().UserId.ToString());
                 if (ticketOwner is not null && ticketOwner.IsActive)
                 {
-                    return (ds, masterKey, null);
+                    return (ds, null);
                 }
             }
         }
 
         Response.Headers["WWW-Authenticate"] = $"Basic realm=\"{ds.Name}\"";
-        return (null, null, Unauthorized());
+        return (null, Unauthorized());
     }
 
     private static string NormalizePath(string? path)
@@ -333,8 +297,16 @@ public sealed class BrowseController(
             return string.Empty;
         }
 
-        path = path.Replace('\\', '/').Trim('/');
-        return path.Length > 0 ? path + "/" : string.Empty;
+        var segments = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var stack = new Stack<string>();
+        foreach (var seg in segments)
+        {
+            if (seg == "..") { if (stack.Count > 0) stack.Pop(); }
+            else if (seg != ".") stack.Push(seg);
+        }
+
+        var resolved = string.Join("/", stack.Reverse());
+        return resolved.Length > 0 ? resolved + "/" : string.Empty;
     }
 
     private static string GetParentPath(string path)
@@ -343,13 +315,5 @@ public sealed class BrowseController(
         var lastSlash = trimmed.LastIndexOf('/');
         return lastSlash < 0 ? "" : trimmed[..(lastSlash + 1)];
     }
-
-    private static bool TryParseFileId(string path, out Guid fileId)
-    {
-        fileId = Guid.Empty;
-        var trimmed = path.TrimEnd('/');
-        var lastSlash = trimmed.LastIndexOf('/');
-        var segment = lastSlash < 0 ? trimmed : trimmed[(lastSlash + 1)..];
-        return Guid.TryParse(segment, out fileId);
-    }
 }
+

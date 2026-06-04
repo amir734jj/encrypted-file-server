@@ -29,22 +29,7 @@ else
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card text-bg-success">
-                <div class="card-body">
-                    <h5 class="card-title"><i class="bi bi-file-earmark-lock me-2"></i>Encrypted Files</h5>
-                    <h2>@_dataSources.Sum(d => d.FileCount)</h2>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card text-bg-info">
-                <div class="card-body">
-                    <h5 class="card-title"><i class="bi bi-hdd me-2"></i>Total Size</h5>
-                    <h2>@FormatBytes(_dataSources.Sum(d => d.TotalFileSize))</h2>
-                </div>
-            </div>
-        </div>
+
     </div>
 
     <div class="card mt-4">
@@ -94,18 +79,5 @@ else
         {
             _dataSources = [];
         }
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
-        double len = bytes;
-        int order = 0;
-        while (len >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            len /= 1024;
-        }
-        return $"{len:0.##} {sizes[order]}";
     }
 }

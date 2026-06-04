@@ -87,11 +87,6 @@ public sealed class ApiService(
     public Task<DataSourceDto> CreateDataSourceAsync(CreateDataSourceRequest req) => dataSourcesApi.CreateAsync(req);
     public Task UpdateDataSourceAsync(Guid id, UpdateDataSourceRequest req) => dataSourcesApi.UpdateAsync(id, req);
     public Task DeleteDataSourceAsync(Guid id) => dataSourcesApi.DeleteAsync(id);
-    public Task<BulkOperationResult> DecryptDataSourceAsync(Guid id) => dataSourcesApi.DecryptAllAsync(id);
-    public Task<BulkOperationResult> ReEncryptDataSourceAsync(Guid id, EncryptionMethod method) => dataSourcesApi.ReEncryptAllAsync(id, method);
-    public Task<BulkOperationResult> CompressDataSourceAsync(Guid id) => dataSourcesApi.CompressAllAsync(id);
-    public Task<BulkOperationResult> DecompressDataSourceAsync(Guid id) => dataSourcesApi.DecompressAllAsync(id);
-    public Task<BulkOperationProgress?> GetDataSourceProgressAsync(Guid id) => dataSourcesApi.GetProgressAsync(id);
     public Task<MasterPasswordResponse> GetMasterPasswordAsync(Guid id) => dataSourcesApi.GetMasterPasswordAsync(id);
     public Task<DataSourceCredentialsResponse> GetCredentialsAsync(Guid id) => dataSourcesApi.GetCredentialsAsync(id);
 
@@ -104,12 +99,9 @@ public sealed class ApiService(
         return await filesApi.UploadAsync(dataSourceId, path, streamPart);
     }
 
-    public Task DeleteFileAsync(Guid id) => filesApi.DeleteAsync(id);
+    public Task DeleteFileAsync(Guid dataSourceId, string path) => filesApi.DeleteAsync(dataSourceId, path);
     public Task DeleteFolderAsync(Guid dataSourceId, string path) => filesApi.DeleteFolderAsync(dataSourceId, path);
     public Task MoveFolderAsync(Guid dataSourceId, string sourcePath, string destinationPath) => filesApi.MoveFolderAsync(dataSourceId, sourcePath, destinationPath);
-
-    public Task<DiscoverResult> DiscoverUntrackedAsync(Guid dataSourceId) => filesApi.DiscoverUntrackedAsync(dataSourceId);
-    public Task<AdoptFilesResult> AdoptFilesAsync(Guid dataSourceId, List<string> storagePaths) => filesApi.AdoptFilesAsync(new AdoptFilesRequest(dataSourceId, storagePaths));
 
     public Task<GlobalConfigModel> GetGlobalConfigAsync() => globalConfigApi.GetAsync();
     public Task SaveGlobalConfigAsync(GlobalConfigModel config) => globalConfigApi.SaveAsync(config);

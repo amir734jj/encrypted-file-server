@@ -6,10 +6,9 @@ using Shared.Models;
 
 namespace Api.Services;
 
-public sealed class DataSourceService(IEfRepository repository, IFileStorageService fileStorage) : IDataSourceService
+public sealed class DataSourceService(IEfRepository repository) : IDataSourceService
 {
     private IBasicCrud<DataSource> Dal => repository.For<DataSource>();
-    private IBasicCrud<EncryptedFile> FileDal => repository.For<EncryptedFile>();
 
     public async Task<List<DataSourceDto>> GetAllAsync(Guid userId)
     {
@@ -18,15 +17,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             orderBy: d => d.Name,
             project: d => d)).ToList();
 
-        var result = new List<DataSourceDto>();
-        foreach (var d in dataSources)
-        {
-            var files = (await FileDal.GetAll(
-                filterExprs: [f => f.DataSourceId == d.Id],
-                project: f => f)).ToList();
-            result.Add(ToDto(d, files.Sum(f => f.OriginalFileSize), files.Count));
-        }
-        return result;
+        return dataSources.Select(d => ToDto(d)).ToList();
     }
 
     public async Task<string?> GetMasterPasswordAsync(Guid id, Guid userId)
@@ -59,10 +50,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         }
 
         var d = dataSources.First();
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == d.Id],
-            project: f => f)).ToList();
-        return ToDto(d, files.Sum(f => f.OriginalFileSize), files.Count);
+        return ToDto(d);
     }
 
     public async Task<DataSourceDto> CreateAsync(Guid userId, CreateDataSourceRequest req)
@@ -91,7 +79,7 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             }).ToList(),
         });
 
-        return ToDto(ds, 0, 0);
+        return ToDto(ds);
     }
 
     public async Task<bool> UpdateAsync(Guid id, Guid userId, UpdateDataSourceRequest req)
@@ -115,12 +103,8 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
 
             ds.Backend.BasePath = req.Backend.BasePath;
             ds.Backend.UseSsl = req.Backend.UseSsl;
-            // UseCompression is NOT updated here —
-            // changing it without rewriting files would corrupt data.
-            // Use the compress/decompress endpoints instead.
-            // EncryptionMethod and MasterPassword are NOT updated here —
-            // changing them without re-encrypting files would corrupt data.
-            // Use the re-encrypt endpoint instead.
+            // UseCompression, EncryptionMethod, and MasterPassword are NOT updated here;
+            // changing them without rewriting all files would corrupt data.
 
             // Sync frontends: add new, update existing, remove absent
             var requestedTypes = req.Frontends.Select(f => f.Type).ToHashSet();
@@ -156,14 +140,6 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
             return false;
         }
 
-        var files = (await FileDal.GetAll(
-            filterExprs: [f => f.DataSourceId == id],
-            project: f => f)).ToList();
-        foreach (var file in files)
-        {
-            await fileStorage.DeleteFileAsync(file);
-        }
-
         await Dal.Delete(id);
         return true;
     }
@@ -173,8 +149,8 @@ public sealed class DataSourceService(IEfRepository repository, IFileStorageServ
         return await Dal.Any(filterExprs: [d => d.UserId == userId && d.Name.ToLower() == name.ToLower().Trim()]);
     }
 
-    private static DataSourceDto ToDto(DataSource d, long totalSize, int fileCount) =>
-        new(d.Id, d.Name, totalSize, fileCount, d.CreatedAt,
+    private static DataSourceDto ToDto(DataSource d) =>
+        new(d.Id, d.Name, 0, 0, d.CreatedAt,
             new BackendDto(d.Backend.Protocol, d.Backend.Host, d.Backend.Port, d.Backend.Username,
                 d.Backend.BasePath, d.Backend.UseSsl, d.Backend.EncryptionMethod, d.Backend.UseCompression),
             d.Frontends.Select(f => new FrontendDto(f.Type, f.AllowAnonymous)).ToList());

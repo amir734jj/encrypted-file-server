@@ -1,21 +1,25 @@
-using Api.Data.Entities;
 using FubarDev.FtpServer.FileSystem;
 
 namespace Api.Ftp;
 
 /// <summary>
-/// Virtual file entry backed by an encrypted file.
+/// Virtual file entry backed by a file on the backend storage.
 /// </summary>
-public sealed class VirtualFileEntry(EncryptedFile encryptedFile, string decryptedName) : IUnixFileEntry
+public sealed class VirtualFileEntry(
+    Guid dataSourceId,
+    string relativePath,
+    string fileName,
+    long size,
+    DateTimeOffset? modified) : IUnixFileEntry
 {
-    public EncryptedFile EncryptedFile => encryptedFile;
-    public string DecryptedName => decryptedName;
-    public string Name => decryptedName;
+    public Guid DataSourceId => dataSourceId;
+    public string RelativePath => relativePath;
+    public string Name => fileName;
     public IUnixPermissions Permissions => new VirtualPermissions();
-    public DateTimeOffset? LastWriteTime => encryptedFile.UpdatedAt ?? encryptedFile.CreatedAt;
-    public DateTimeOffset? CreatedTime => encryptedFile.CreatedAt;
+    public DateTimeOffset? LastWriteTime => modified;
+    public DateTimeOffset? CreatedTime => modified;
     public long NumberOfLinks => 1;
     public string Owner => "owner";
     public string Group => "group";
-    public long Size => encryptedFile.OriginalFileSize;
+    public long Size => size;
 }
