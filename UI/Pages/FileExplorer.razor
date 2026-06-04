@@ -264,11 +264,7 @@ else
                     @if (_discoverResult.Files.Count > 0)
                     {
                         <HxButton Color="ThemeColor.Primary" OnClick="AdoptSelected"
-                                  Enabled="@(_selectedUntracked.Count > 0 && !_adopting)">
-                            @if (_adopting)
-                            {
-                                <span class="spinner-border spinner-border-sm me-1"></span>
-                            }
+                                  Enabled="@(_selectedUntracked.Count > 0)">
                             <i class="bi bi-plus-circle me-1"></i> Adopt @_selectedUntracked.Count File(s)
                         </HxButton>
                     }
@@ -292,7 +288,7 @@ else
     private string? _moveDestination;
     private DiscoverResult? _discoverResult;
     private HashSet<string> _selectedUntracked = new();
-    private bool _adopting;
+
 
     protected override async Task OnParametersSetAsync()
     {
@@ -524,8 +520,6 @@ else
     {
         if (_selectedUntracked.Count == 0) return;
 
-        _adopting = true;
-        StateHasChanged();
         try
         {
             var result = await Api.AdoptFilesAsync(DataSourceId, _selectedUntracked.ToList());
@@ -542,7 +536,6 @@ else
         }
         finally
         {
-            _adopting = false;
             StateHasChanged();
         }
     }
