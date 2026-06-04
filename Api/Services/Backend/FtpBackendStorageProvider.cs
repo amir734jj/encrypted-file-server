@@ -118,6 +118,21 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         var results = new List<(string path, long size, DateTimeOffset? modified)>();
         await ListFtpRecursiveAsync(client, listRoot, results, logger, ct);
 
+        // Make paths relative to the listing root so that ResolveStoragePath
+        // can reconstruct correct paths relative to the FTP working directory.
+        var normalizedRoot = listRoot.TrimEnd('/');
+        if (!string.IsNullOrEmpty(normalizedRoot) && normalizedRoot != ".")
+        {
+            for (var i = 0; i < results.Count; i++)
+            {
+                var (p, s, m) = results[i];
+                if (p.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    results[i] = (p[normalizedRoot.Length..].TrimStart('/'), s, m);
+                }
+            }
+        }
+
         logger.LogInformation("FTP ListFiles found {Count} files", results.Count);
         return results;
     }
