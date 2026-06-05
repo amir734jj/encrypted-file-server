@@ -45,6 +45,7 @@ else
                             <i class="bi bi-folder-fill text-warning me-2"></i>@ds.Name
                         </h5>
                         <small class="text-muted d-block">@(ds.Backend.Protocol == BackendStorageType.SftpClient ? "SFTP" : "FTP"): @ds.Backend.Host:@ds.Backend.Port</small>
+                        <small class="text-muted d-block"><i class="bi bi-hdd me-1"></i>Path: <code>/@(string.IsNullOrWhiteSpace(ds.Backend.BasePath) ? "/" : ds.Backend.BasePath)</code></small>
                         @foreach (var fe in ds.Frontends)
                         {
                             var badgeClass = fe.Type == FrontendType.Ftp ? "bg-info" : "bg-success";
