@@ -146,12 +146,13 @@ public sealed class FileStorageService(
         var files = await storage.ListFilesAsync(connection, ct);
 
         var basePath = connection.BasePath?.TrimEnd('/');
+        var basePrefix = string.IsNullOrEmpty(basePath) ? null : basePath + "/";
         return files.Select(f =>
         {
             var path = f.path;
-            if (!string.IsNullOrEmpty(basePath) && path.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+            if (basePrefix != null && path.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
             {
-                path = path[(basePath.Length + 1)..];
+                path = path[basePrefix.Length..];
             }
             path = path.TrimStart('/');
             return new BackendFileEntry(path, f.size, f.modified);

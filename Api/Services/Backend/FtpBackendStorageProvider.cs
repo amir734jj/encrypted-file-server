@@ -123,12 +123,13 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         var normalizedRoot = listRoot.TrimEnd('/');
         if (!string.IsNullOrEmpty(normalizedRoot) && normalizedRoot != ".")
         {
+            var rootPrefix = normalizedRoot + "/";
             for (var i = 0; i < results.Count; i++)
             {
                 var (p, s, m) = results[i];
-                if (p.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+                if (p.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    results[i] = (p[normalizedRoot.Length..].TrimStart('/'), s, m);
+                    results[i] = (p[rootPrefix.Length..], s, m);
                 }
             }
         }
