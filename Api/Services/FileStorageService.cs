@@ -147,16 +147,14 @@ public sealed class FileStorageService(
 
         var basePath = connection.BasePath?.TrimEnd('/');
         var basePrefix = string.IsNullOrEmpty(basePath) ? null : basePath + "/";
-        return files.Select(f =>
-        {
-            var path = f.path;
-            if (basePrefix != null && path.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
+        return files
+            .Where(f => basePrefix == null || f.path.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
+            .Select(f =>
             {
-                path = path[basePrefix.Length..];
-            }
-            path = path.TrimStart('/');
-            return new BackendFileEntry(path, f.size, f.modified);
-        }).Where(f => !string.IsNullOrWhiteSpace(f.Path)).ToList();
+                var path = basePrefix != null ? f.path[basePrefix.Length..] : f.path;
+                path = path.TrimStart('/');
+                return new BackendFileEntry(path, f.size, f.modified);
+            }).Where(f => !string.IsNullOrWhiteSpace(f.Path)).ToList();
     }
 
     public async Task<long> GetDecompressedSizeAsync(DataSource ds, string relativePath, CancellationToken ct = default)
