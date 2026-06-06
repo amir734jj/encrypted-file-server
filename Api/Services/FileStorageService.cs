@@ -86,7 +86,13 @@ public sealed class FileStorageService(
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
 
         var storageName = EncryptPath(ds, relativePath, masterKey);
-        var fileStream = await storage.OpenReadAsync(connection, connection.ResolveStoragePath(storageName));
+        var resolvedPath = connection.ResolveStoragePath(storageName);
+
+        // Fall back to plain path for files stored before filename encryption
+        if (storageName != relativePath && !await storage.ExistsAsync(connection, resolvedPath))
+            resolvedPath = connection.ResolveStoragePath(relativePath);
+
+        var fileStream = await storage.OpenReadAsync(connection, resolvedPath);
 
         // Read the embedded IV from the start of the file
         var ivSize = GetIvSize(ds.Backend.EncryptionMethod);
@@ -137,7 +143,13 @@ public sealed class FileStorageService(
         var connection = ds.ToBackendConnectionInfo();
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var storageName = EncryptPath(ds, relativePath, masterKey);
-        return await storage.OpenReadAsync(connection, connection.ResolveStoragePath(storageName));
+        var resolvedPath = connection.ResolveStoragePath(storageName);
+
+        // Fall back to plain path for files stored before filename encryption
+        if (storageName != relativePath && !await storage.ExistsAsync(connection, resolvedPath))
+            resolvedPath = connection.ResolveStoragePath(relativePath);
+
+        return await storage.OpenReadAsync(connection, resolvedPath);
     }
 
     public async Task<bool> DeleteFileAsync(DataSource ds, string relativePath)
@@ -146,7 +158,13 @@ public sealed class FileStorageService(
         var connection = ds.ToBackendConnectionInfo();
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var storageName = EncryptPath(ds, relativePath, masterKey);
-        return await storage.DeleteAsync(connection, connection.ResolveStoragePath(storageName));
+        var deleted = await storage.DeleteAsync(connection, connection.ResolveStoragePath(storageName));
+
+        // Fall back to plain path for files stored before filename encryption
+        if (!deleted && storageName != relativePath)
+            deleted = await storage.DeleteAsync(connection, connection.ResolveStoragePath(relativePath));
+
+        return deleted;
     }
 
     public async Task<List<BackendFileEntry>> ListFilesAsync(DataSource ds, CancellationToken ct = default)
@@ -164,10 +182,15 @@ public sealed class FileStorageService(
             {
                 var path = basePrefix != null ? f.path[basePrefix.Length..] : f.path;
                 path = path.TrimStart('/');
-                // Decrypt path segments if filename encryption is enabled
-                path = DecryptPath(ds, path, masterKey);
-                return new BackendFileEntry(path, f.size, f.modified);
-            }).Where(f => !string.IsNullOrWhiteSpace(f.Path)).ToList();
+
+                // Preserve trailing "/" for empty-directory markers
+                var isDir = path.EndsWith('/');
+                var corePath = isDir ? path[..^1] : path;
+                corePath = DecryptPath(ds, corePath, masterKey);
+                if (isDir) corePath += "/";
+
+                return new BackendFileEntry(corePath, f.size, f.modified);
+            }).Where(f => !string.IsNullOrWhiteSpace(f.Path.TrimEnd('/'))).ToList();
     }
 
     public async Task<long> GetDecompressedSizeAsync(DataSource ds, string relativePath, CancellationToken ct = default)
@@ -183,6 +206,15 @@ public sealed class FileStorageService(
             var storagePath = connection.ResolveStoragePath(storageName);
             var match = files.FirstOrDefault(f =>
                 f.path.Equals(storagePath, StringComparison.OrdinalIgnoreCase));
+
+            // Fall back to plain path for pre-encryption files
+            if (match.path is null && storageName != relativePath)
+            {
+                storagePath = connection.ResolveStoragePath(relativePath);
+                match = files.FirstOrDefault(f =>
+                    f.path.Equals(storagePath, StringComparison.OrdinalIgnoreCase));
+            }
+
             return match.size;
         }
 
@@ -205,8 +237,13 @@ public sealed class FileStorageService(
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var oldStorageName = EncryptPath(ds, oldRelativePath, masterKey);
         var newStorageName = EncryptPath(ds, newRelativePath, masterKey);
-        return await storage.RenameAsync(connection,
-            connection.ResolveStoragePath(oldStorageName), newStorageName);
+        var oldResolvedPath = connection.ResolveStoragePath(oldStorageName);
+
+        // Fall back to plain path for files stored before filename encryption
+        if (oldStorageName != oldRelativePath && !await storage.ExistsAsync(connection, oldResolvedPath))
+            oldResolvedPath = connection.ResolveStoragePath(oldRelativePath);
+
+        return await storage.RenameAsync(connection, oldResolvedPath, newStorageName);
     }
 
     public async Task<bool> ExistsAsync(DataSource ds, string relativePath, CancellationToken ct = default)
@@ -215,7 +252,14 @@ public sealed class FileStorageService(
         var connection = ds.ToBackendConnectionInfo();
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var storageName = EncryptPath(ds, relativePath, masterKey);
-        return await storage.ExistsAsync(connection, connection.ResolveStoragePath(storageName));
+        if (await storage.ExistsAsync(connection, connection.ResolveStoragePath(storageName)))
+            return true;
+
+        // Fall back to plain path for files stored before filename encryption
+        if (storageName != relativePath)
+            return await storage.ExistsAsync(connection, connection.ResolveStoragePath(relativePath));
+
+        return false;
     }
 
     private static int GetIvSize(EncryptionMethod method) => method switch
@@ -229,9 +273,13 @@ public sealed class FileStorageService(
 
     // ── Filename encryption helpers ──────────────────────────────────────
 
+    /// <summary>Prefix added to each encrypted path segment to distinguish from plain names.</summary>
+    private const string EncPrefix = "~e~";
+
     /// <summary>
     /// Encrypts each segment of a relative path using a deterministic IV derived
-    /// from the master key. Returns a filesystem-safe base64url-encoded path.
+    /// from the master key. Returns a filesystem-safe base64url-encoded path
+    /// with a prefix marker on each segment.
     /// </summary>
     private string EncryptPath(DataSource ds, string relativePath, byte[] masterKey)
     {
@@ -246,14 +294,14 @@ public sealed class FileStorageService(
         {
             if (string.IsNullOrEmpty(segments[i])) continue;
             var encrypted = encryption.EncryptString(segments[i], masterKey, iv);
-            segments[i] = Base64UrlEncode(encrypted);
+            segments[i] = EncPrefix + Base64UrlEncode(encrypted);
         }
         return string.Join("/", segments);
     }
 
     /// <summary>
     /// Decrypts each segment of a path returned by the backend, reversing EncryptPath.
-    /// Segments that fail to decrypt are returned as-is (e.g. files placed manually).
+    /// Only segments with the encryption prefix are decrypted; plain segments are left as-is.
     /// </summary>
     private string DecryptPath(DataSource ds, string encryptedPath, byte[] masterKey)
     {
@@ -266,15 +314,15 @@ public sealed class FileStorageService(
         var segments = encryptedPath.Split('/');
         for (var i = 0; i < segments.Length; i++)
         {
-            if (string.IsNullOrEmpty(segments[i])) continue;
+            if (!segments[i].StartsWith(EncPrefix)) continue;
             try
             {
-                var base64 = Base64UrlDecode(segments[i]);
+                var base64 = Base64UrlDecode(segments[i][EncPrefix.Length..]);
                 segments[i] = encryption.DecryptString(base64, masterKey, iv);
             }
             catch
             {
-                // Not an encrypted segment — leave as-is
+                // Decryption failed — leave as-is
             }
         }
         return string.Join("/", segments);

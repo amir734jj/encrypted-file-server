@@ -39,6 +39,22 @@ public sealed class FilesController(
         foreach (var f in backendFiles)
         {
             var filePath = f.Path;
+
+            // Directory marker (trailing "/", size -1) — register as folder
+            if (filePath.EndsWith('/'))
+            {
+                filePath = filePath[..^1]; // strip trailing "/"
+                if (!string.IsNullOrEmpty(path) &&
+                    !filePath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var relDir = string.IsNullOrEmpty(path) ? filePath : filePath[path.Length..];
+                var dirSlash = relDir.IndexOf('/');
+                var dirName = dirSlash < 0 ? relDir : relDir[..dirSlash];
+                if (!string.IsNullOrEmpty(dirName))
+                    subfolders.TryAdd(dirName, (0, 0));
+                continue;
+            }
+
             if (!string.IsNullOrEmpty(path) &&
                 !filePath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
             {

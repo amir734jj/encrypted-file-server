@@ -119,6 +119,12 @@ public sealed class SftpBackendStorageProvider(ILogger<SftpBackendStorageProvide
             if (item.IsDirectory)
             {
                 ListFilesRecursive(client, item.FullName, results);
+
+                // Emit a marker for empty directories so they appear in listings
+                if (!results.Any(r => r.path.StartsWith(item.FullName + "/", StringComparison.Ordinal)))
+                {
+                    results.Add((item.FullName + "/", -1, null));
+                }
             }
             else if (item.IsRegularFile)
             {
