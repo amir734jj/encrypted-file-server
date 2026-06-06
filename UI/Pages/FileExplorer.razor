@@ -46,6 +46,12 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : "Files")</h3>
     <div class="d-flex gap-2">
+        @if (_listing is not null && (_listing.Folders.Count > 0 || _listing.Files.Count > 0))
+        {
+            <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="DeleteAll">
+                <i class="bi bi-trash me-1"></i> Delete All
+            </HxButton>
+        }
         <InputFile @key="_uploadInputKey" OnChange="HandleFileUpload" class="d-none" id="fileUpload" multiple />
         <label for="fileUpload" class="btn btn-primary btn-sm">
             <i class="bi bi-upload me-1"></i> Upload Files
@@ -339,6 +345,38 @@ else
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to delete folder: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteAll()
+    {
+        if (_listing is null) return;
+        var totalItems = _listing.Folders.Count + _listing.Files.Count;
+        var confirmed = await MessageBox.ConfirmAsync(
+            $"Delete ALL {totalItems} item(s) in this directory? This cannot be undone.");
+        if (!confirmed) return;
+
+        try
+        {
+            foreach (var folder in _listing.Folders)
+            {
+                var folderPath = string.IsNullOrEmpty(Path)
+                    ? folder.Name + "/"
+                    : $"{Path}/{folder.Name}/";
+                await Api.DeleteFolderAsync(DataSourceId, folderPath);
+            }
+            foreach (var file in _listing.Files)
+            {
+                var fullPath = string.IsNullOrEmpty(Path) ? file.FileName : $"{Path}/{file.FileName}";
+                await Api.DeleteFileAsync(DataSourceId, fullPath);
+            }
+            await LoadAsync();
+            Messenger.AddInformation($"Deleted {totalItems} item(s).");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to delete all: {ex.Message}");
+            await LoadAsync();
         }
     }
 
