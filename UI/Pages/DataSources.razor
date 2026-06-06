@@ -1,4 +1,5 @@
 @page "/datasources"
+@using ByteSizeLib
 @using Shared.Contracts
 @using Shared.Models
 @inject ApiService Api
@@ -58,7 +59,7 @@ else
                         }
                         @if (ds.MaxSizeBytes.HasValue)
                         {
-                            <span class="badge bg-warning text-dark me-1 mt-1">Max @(ds.MaxSizeBytes.Value / (1024 * 1024)) MB</span>
+                            <span class="badge bg-warning text-dark me-1 mt-1">Max @(ByteSize.FromBytes(ds.MaxSizeBytes.Value).ToString())</span>
                         }
                         @if (ds.Backend.EncryptionMethod != EncryptionMethod.None && _revealedPasswords.TryGetValue(ds.Id, out var pwd))
                         {
