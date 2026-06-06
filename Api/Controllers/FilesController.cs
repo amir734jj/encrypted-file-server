@@ -153,8 +153,8 @@ public sealed class FilesController(
         }
 
         path = NormalizePath(path).TrimEnd('/');
-        await fileStorage.DeleteFileAsync(ds, path);
-        return NoContent();
+        var deleted = await fileStorage.DeleteFileAsync(ds, path);
+        return deleted ? NoContent() : NotFound();
     }
 
     [HttpDelete("folder")]

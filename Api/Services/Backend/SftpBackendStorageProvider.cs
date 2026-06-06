@@ -8,7 +8,7 @@ namespace Api.Services.Backend;
 /// Stores encrypted file blobs on a remote SFTP server via SSH.NET.
 /// Each call receives per-datasource connection info.
 /// </summary>
-public sealed class SftpBackendStorageProvider : IBackendStorageProvider
+public sealed class SftpBackendStorageProvider(ILogger<SftpBackendStorageProvider> logger) : IBackendStorageProvider
 {
     public string ProviderKey => "sftp-client";
     public BackendStorageType StorageType => BackendStorageType.SftpClient;
@@ -48,12 +48,24 @@ public sealed class SftpBackendStorageProvider : IBackendStorageProvider
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {
         using var client = Connect(connection);
+
+        // Resolve relative paths against the working directory for consistency.
+        if (!storagePath.StartsWith('/'))
+        {
+            var wd = client.WorkingDirectory;
+            storagePath = wd.TrimEnd('/') + "/" + storagePath;
+        }
+
+        logger.LogInformation("SFTP DeleteFile: checking existence of {StoragePath}", storagePath);
+
         if (!client.Exists(storagePath))
         {
+            logger.LogWarning("SFTP DeleteFile: file not found at {StoragePath}", storagePath);
             return Task.FromResult(false);
         }
 
         client.DeleteFile(storagePath);
+        logger.LogInformation("SFTP DeleteFile: deleted {StoragePath}", storagePath);
         return Task.FromResult(true);
     }
 

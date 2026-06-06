@@ -55,12 +55,26 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {
         using var client = await ConnectAsync(connection, ct);
+
+        // Resolve relative paths against the working directory so we always
+        // use an absolute path – some FTP servers don't resolve relative
+        // paths correctly for SIZE/DELE commands.
+        if (!storagePath.StartsWith('/'))
+        {
+            var wd = await client.GetWorkingDirectory(ct);
+            storagePath = wd.TrimEnd('/') + "/" + storagePath;
+        }
+
+        logger.LogInformation("FTP DeleteFile: checking existence of {StoragePath}", storagePath);
+
         if (!await client.FileExists(storagePath, ct))
         {
+            logger.LogWarning("FTP DeleteFile: file not found at {StoragePath}", storagePath);
             return false;
         }
 
         await client.DeleteFile(storagePath, ct);
+        logger.LogInformation("FTP DeleteFile: deleted {StoragePath}", storagePath);
         return true;
     }
 
