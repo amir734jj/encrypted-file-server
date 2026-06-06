@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using Shared.Interfaces;
 
@@ -10,8 +9,7 @@ public sealed class NoneEncryptionProvider : IEncryptionProvider
 
     public (Stream encryptingStream, byte[] iv) CreateEncryptingStream(Stream destination, byte[] masterKey)
     {
-        var iv = RandomNumberGenerator.GetBytes(16);
-        return (new PassthroughStream(destination), iv);
+        return (new PassthroughStream(destination), []);
     }
 
     public Stream CreateDecryptingStream(Stream source, byte[] masterKey, byte[] iv)
