@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text;
 using Api.Data.Entities;
 using Api.Extensions;
@@ -104,11 +105,11 @@ public sealed class BrowseController(
                         await stream.CopyToAsync(tempStream);
                     }
                     tempStream.Position = 0;
-                    Response.Headers.ContentDisposition = $"inline; filename=\"{fileName}\"";
+                    Response.Headers.ContentDisposition = new ContentDispositionHeaderValue("inline") { FileName = fileName }.ToString();
                     return File(tempStream, contentType, enableRangeProcessing: true);
                 }
 
-                Response.Headers.ContentDisposition = $"inline; filename=\"{fileName}\"";
+                Response.Headers.ContentDisposition = new ContentDispositionHeaderValue("inline") { FileName = fileName }.ToString();
                 return File(stream, contentType);
             }
         }
