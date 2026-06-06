@@ -277,55 +277,56 @@ public sealed class FileStorageService(
     private const string EncPrefix = "~e~";
 
     /// <summary>
-    /// Encrypts each segment of a relative path using a deterministic IV derived
-    /// from the master key. Returns a filesystem-safe base64url-encoded path
-    /// with a prefix marker on each segment.
+    /// Encrypts only the filename (last segment) of a relative path using a
+    /// deterministic IV derived from the master key. Directory names are kept
+    /// in plaintext so the folder structure stays readable on the backend.
     /// </summary>
     private string EncryptPath(DataSource ds, string relativePath, byte[] masterKey)
     {
         if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
             return relativePath;
 
+        var lastSlash = relativePath.LastIndexOf('/');
+        var dir = lastSlash >= 0 ? relativePath[..(lastSlash + 1)] : "";
+        var fileName = lastSlash >= 0 ? relativePath[(lastSlash + 1)..] : relativePath;
+
+        if (string.IsNullOrEmpty(fileName))
+            return relativePath;
+
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var iv = DeriveFilenameIv(masterKey, GetIvSize(ds.Backend.EncryptionMethod));
+        var encrypted = encryption.EncryptString(fileName, masterKey, iv);
 
-        var segments = relativePath.Split('/');
-        for (var i = 0; i < segments.Length; i++)
-        {
-            if (string.IsNullOrEmpty(segments[i])) continue;
-            var encrypted = encryption.EncryptString(segments[i], masterKey, iv);
-            segments[i] = EncPrefix + Base64UrlEncode(encrypted);
-        }
-        return string.Join("/", segments);
+        return dir + EncPrefix + Base64UrlEncode(encrypted);
     }
 
     /// <summary>
-    /// Decrypts each segment of a path returned by the backend, reversing EncryptPath.
-    /// Only segments with the encryption prefix are decrypted; plain segments are left as-is.
+    /// Decrypts only the filename (last segment) of a backend path if it carries
+    /// the encryption prefix. Directory names are never encrypted.
     /// </summary>
     private string DecryptPath(DataSource ds, string encryptedPath, byte[] masterKey)
     {
         if (ds.Backend.EncryptionMethod == EncryptionMethod.None)
             return encryptedPath;
 
-        var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
-        var iv = DeriveFilenameIv(masterKey, GetIvSize(ds.Backend.EncryptionMethod));
+        var lastSlash = encryptedPath.LastIndexOf('/');
+        var dir = lastSlash >= 0 ? encryptedPath[..(lastSlash + 1)] : "";
+        var fileName = lastSlash >= 0 ? encryptedPath[(lastSlash + 1)..] : encryptedPath;
 
-        var segments = encryptedPath.Split('/');
-        for (var i = 0; i < segments.Length; i++)
+        if (!fileName.StartsWith(EncPrefix))
+            return encryptedPath;
+
+        try
         {
-            if (!segments[i].StartsWith(EncPrefix)) continue;
-            try
-            {
-                var base64 = Base64UrlDecode(segments[i][EncPrefix.Length..]);
-                segments[i] = encryption.DecryptString(base64, masterKey, iv);
-            }
-            catch
-            {
-                // Decryption failed — leave as-is
-            }
+            var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
+            var iv = DeriveFilenameIv(masterKey, GetIvSize(ds.Backend.EncryptionMethod));
+            var base64 = Base64UrlDecode(fileName[EncPrefix.Length..]);
+            return dir + encryption.DecryptString(base64, masterKey, iv);
         }
-        return string.Join("/", segments);
+        catch
+        {
+            return encryptedPath;
+        }
     }
 
     /// <summary>
