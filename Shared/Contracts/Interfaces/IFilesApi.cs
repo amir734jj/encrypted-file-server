@@ -20,4 +20,7 @@ public interface IFilesApi
 
     [Post("/api/files/move-folder")]
     Task MoveFolderAsync([Query] Guid dataSourceId, [Query] string sourcePath, [Query] string destinationPath);
+
+    [Get("/api/files/size")]
+    Task<DataSourceSizeDto> GetSizeAsync([Query] Guid dataSourceId);
 }

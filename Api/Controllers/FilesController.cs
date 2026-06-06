@@ -271,6 +271,19 @@ public sealed class FilesController(
         return dataSources.FirstOrDefault();
     }
 
+    [HttpGet("size")]
+    public async Task<IActionResult> GetSize([FromQuery] Guid dataSourceId)
+    {
+        var ds = await GetDataSource(dataSourceId);
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
+        var totalSize = await fileStorage.GetTotalStoredSizeAsync(ds);
+        return Ok(new DataSourceSizeDto(totalSize, ds.MaxSizeBytes));
+    }
+
     private static string NormalizePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))

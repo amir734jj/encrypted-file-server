@@ -6,6 +6,7 @@
 @inject IHxMessengerService Messenger
 @inject IHxMessageBoxService MessageBox
 @inject IJSRuntime JS
+@using ByteSizeLib
 @using Shared.Models
 
 @if (!Auth.IsAuthenticated)
@@ -44,7 +45,27 @@
 </nav>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : _dataSourceName ?? "Files")</h3>
+    <div>
+        <h3 class="mb-1"><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : _dataSourceName ?? "Files")</h3>
+        @if (_sizeInfo is not null)
+        {
+            <small class="text-muted">
+                <i class="bi bi-hdd me-1"></i>@(ByteSize.FromBytes(_sizeInfo.TotalSize).ToString()) used
+                @if (_sizeInfo.MaxSizeBytes.HasValue)
+                {
+                    <text> / @(ByteSize.FromBytes(_sizeInfo.MaxSizeBytes.Value).ToString()) max</text>
+                }
+            </small>
+            @if (_sizeInfo.MaxSizeBytes.HasValue)
+            {
+                var pct = Math.Min(100, (int)(100.0 * _sizeInfo.TotalSize / _sizeInfo.MaxSizeBytes.Value));
+                var barColor = pct >= 90 ? "bg-danger" : pct >= 70 ? "bg-warning" : "bg-success";
+                <div class="progress mt-1" style="height: 5px; max-width: 300px;">
+                    <div class="progress-bar @barColor" style="width: @(pct)%"></div>
+                </div>
+            }
+        }
+    </div>
     <div class="d-flex gap-2">
         @if (_listing is not null && (_listing.Folders.Count > 0 || _listing.Files.Count > 0))
         {
@@ -217,6 +238,7 @@ else
     private FolderEntryDto? _movingFolder;
     private string? _moveDestination;
     private string? _dataSourceName;
+    private DataSourceSizeDto? _sizeInfo;
 
 
     protected override async Task OnParametersSetAsync()
@@ -234,6 +256,7 @@ else
             _dataSourceName = dataSources.FirstOrDefault(d => d.Id == DataSourceId)?.Name;
         }
         await LoadAsync();
+        await LoadSizeAsync();
     }
 
     private List<string> GetPathSegments() =>
@@ -251,6 +274,19 @@ else
         {
             Messenger.AddError($"Failed to load: {ex.Message}");
             _listing = new DirectoryListingDto("", [], []);
+        }
+    }
+
+    private async Task LoadSizeAsync()
+    {
+        try
+        {
+            _sizeInfo = await Api.GetDataSourceSizeAsync(DataSourceId);
+            StateHasChanged();
+        }
+        catch
+        {
+            // Non-critical — don't show error for size fetch failure
         }
     }
 
@@ -290,6 +326,7 @@ else
         _uploading = false;
         _uploadInputKey++;
         await LoadAsync();
+        await LoadSizeAsync();
         StateHasChanged();
         Messenger.AddInformation($"Uploaded {_uploadTotal} file(s).");
     }
@@ -322,6 +359,7 @@ else
             var fullPath = string.IsNullOrEmpty(Path) ? file.FileName : $"{Path}/{file.FileName}";
             await Api.DeleteFileAsync(DataSourceId, fullPath);
             await LoadAsync();
+            await LoadSizeAsync();
             Messenger.AddInformation("File deleted.");
         }
         catch (Exception ex)
@@ -346,6 +384,7 @@ else
                 : $"{Path}/{folder.Name}/";
             await Api.DeleteFolderAsync(DataSourceId, folderPath);
             await LoadAsync();
+            await LoadSizeAsync();
             Messenger.AddInformation("Folder deleted.");
         }
         catch (Exception ex)
@@ -377,12 +416,14 @@ else
                 await Api.DeleteFileAsync(DataSourceId, fullPath);
             }
             await LoadAsync();
+            await LoadSizeAsync();
             Messenger.AddInformation($"Deleted {totalItems} item(s).");
         }
         catch (Exception ex)
         {
             Messenger.AddError($"Failed to delete all: {ex.Message}");
             await LoadAsync();
+            await LoadSizeAsync();
         }
     }
 
