@@ -22,11 +22,11 @@
         }
         @if (segments.Count == 0)
         {
-            <li class="breadcrumb-item active">Files</li>
+            <li class="breadcrumb-item active">@(_dataSourceName ?? "Files")</li>
         }
         else
         {
-            <li class="breadcrumb-item"><a href="/files/@DataSourceId">Root</a></li>
+            <li class="breadcrumb-item"><a href="/files/@DataSourceId">@(_dataSourceName ?? "Root")</a></li>
             @for (var i = 0; i < segments.Count; i++)
             {
                 var breadcrumbPath = string.Join("/", segments.Take(i + 1));
@@ -44,7 +44,7 @@
 </nav>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : "Files")</h3>
+    <h3><i class="bi bi-folder2-open me-2"></i>@(segments.Count > 0 ? segments.Last() : _dataSourceName ?? "Files")</h3>
     <div class="d-flex gap-2">
         @if (_listing is not null && (_listing.Folders.Count > 0 || _listing.Files.Count > 0))
         {
@@ -216,6 +216,7 @@ else
     private int _uploadInputKey;
     private FolderEntryDto? _movingFolder;
     private string? _moveDestination;
+    private string? _dataSourceName;
 
 
     protected override async Task OnParametersSetAsync()
@@ -227,6 +228,11 @@ else
 
         _listing = null; // Show loading spinner while fetching
         StateHasChanged();
+        if (_dataSourceName is null)
+        {
+            var dataSources = await Api.GetDataSourcesAsync();
+            _dataSourceName = dataSources.FirstOrDefault(d => d.Id == DataSourceId)?.Name;
+        }
         await LoadAsync();
     }
 
