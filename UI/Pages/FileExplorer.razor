@@ -287,7 +287,7 @@ else
         try
         {
             var baseUrl = Nav.BaseUri.TrimEnd('/');
-            var fullPath = (Path ?? "") + file.FileName;
+            var fullPath = string.IsNullOrEmpty(Path) ? file.FileName : $"{Path}/{file.FileName}";
             var url = $"{baseUrl}/api/files/download?dataSourceId={DataSourceId}&path={Uri.EscapeDataString(fullPath)}";
             await JS.InvokeVoidAsync("triggerFileDownload", url, file.FileName, Auth.Token);
         }
@@ -307,7 +307,7 @@ else
 
         try
         {
-            var fullPath = (Path ?? "") + file.FileName;
+            var fullPath = string.IsNullOrEmpty(Path) ? file.FileName : $"{Path}/{file.FileName}";
             await Api.DeleteFileAsync(DataSourceId, fullPath);
             await LoadAsync();
             Messenger.AddInformation("File deleted.");
