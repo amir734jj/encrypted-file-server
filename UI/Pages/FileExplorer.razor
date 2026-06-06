@@ -83,14 +83,14 @@ else if (_listing.Folders.Count == 0 && _listing.Files.Count == 0)
 else
 {
     <div class="table-responsive">
-        <table class="table table-hover align-middle">
+        <table class="table table-hover align-middle file-table">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Size</th>
-                    <th>Type</th>
-                    <th>Modified</th>
-                    <th class="text-end">Actions</th>
+                    <th class="col-name">Name</th>
+                    <th class="col-size">Size</th>
+                    <th class="col-type">Type</th>
+                    <th class="col-modified">Modified</th>
+                    <th class="col-actions text-end">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -100,22 +100,22 @@ else
                         ? string.Join("/", segments.Take(segments.Count - 1))
                         : "";
                     <tr class="cursor-pointer" @onclick="() => NavigateTo(parentPath)">
-                        <td><i class="bi bi-arrow-up me-1 text-muted"></i> ..</td>
-                        <td></td><td></td><td></td><td></td>
+                        <td class="col-name"><i class="bi bi-arrow-up me-1 text-muted"></i> ..</td>
+                        <td class="col-size"></td><td class="col-type"></td><td class="col-modified"></td><td class="col-actions"></td>
                     </tr>
                 }
                 @foreach (var folder in _listing.Folders)
                 {
                     var folderPath = string.IsNullOrEmpty(Path) ? folder.Name : $"{Path}/{folder.Name}";
                     <tr class="cursor-pointer" @onclick="() => NavigateTo(folderPath)">
-                        <td>
+                        <td class="col-name" title="@folder.Name">
                             <i class="bi bi-folder-fill text-warning me-1"></i>
                             @folder.Name
                         </td>
-                        <td>@FormatBytes(folder.TotalSize)</td>
-                        <td><span class="badge bg-secondary">folder</span></td>
-                        <td></td>
-                        <td class="text-end">
+                        <td class="col-size">@FormatBytes(folder.TotalSize)</td>
+                        <td class="col-type"><span class="badge bg-secondary">folder</span></td>
+                        <td class="col-modified"></td>
+                        <td class="col-actions text-end">
                             <HxButton Color="ThemeColor.Warning" Size="ButtonSize.Small" Outline="true"
                                       OnClick="() => ShowMoveFolder(folder)" OnClickStopPropagation="true"
                                       title="Move">
@@ -131,14 +131,14 @@ else
                 @foreach (var file in _listing.Files)
                 {
                     <tr>
-                        <td>
+                        <td class="col-name" title="@file.FileName">
                             <i class="bi bi-file-earmark me-1 text-muted"></i>
                             @file.FileName
                         </td>
-                        <td>@FormatBytes(file.FileSize)</td>
-                        <td><span class="badge bg-secondary">@(file.ContentType ?? "unknown")</span></td>
-                        <td>@(file.Modified?.LocalDateTime.ToString("MMM dd, yyyy HH:mm") ?? "—")</td>
-                        <td class="text-end">
+                        <td class="col-size">@FormatBytes(file.FileSize)</td>
+                        <td class="col-type"><span class="badge bg-secondary">@(file.ContentType ?? "unknown")</span></td>
+                        <td class="col-modified">@(file.Modified?.LocalDateTime.ToString("MMM dd, yyyy HH:mm") ?? "—")</td>
+                        <td class="col-actions text-end">
                             <HxButton Color="ThemeColor.Success" Size="ButtonSize.Small" Outline="true" OnClick="() => DownloadFile(file)">
                                 <i class="bi bi-download"></i>
                             </HxButton>
