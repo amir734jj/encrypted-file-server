@@ -43,6 +43,9 @@ public interface IFileStorageService
 
     /// <summary>Checks whether a file exists on the backend.</summary>
     Task<bool> ExistsAsync(DataSource ds, string relativePath, CancellationToken ct = default);
+
+    /// <summary>Gets the total stored size of all files in the data source.</summary>
+    Task<long> GetTotalStoredSizeAsync(DataSource ds, CancellationToken ct = default);
 }
 
 /// <summary>

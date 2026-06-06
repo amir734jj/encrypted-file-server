@@ -7,4 +7,5 @@ public record DataSourceDto(
     int FileCount,
     DateTimeOffset CreatedAt,
     BackendDto Backend,
-    List<FrontendDto> Frontends);
+    List<FrontendDto> Frontends,
+    long? MaxSizeBytes = null);

@@ -287,6 +287,12 @@ public sealed class FileStorageService(
         return false;
     }
 
+    public async Task<long> GetTotalStoredSizeAsync(DataSource ds, CancellationToken ct = default)
+    {
+        var files = await ListFilesAsync(ds, ct);
+        return files.Where(f => !f.Path.EndsWith('/')).Sum(f => f.StoredSize);
+    }
+
     private static int GetIvSize(EncryptionMethod method) => method switch
     {
         EncryptionMethod.None => 0,

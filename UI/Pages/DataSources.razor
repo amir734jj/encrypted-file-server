@@ -56,6 +56,10 @@ else
                         {
                             <span class="badge bg-info me-1 mt-1">Compressed</span>
                         }
+                        @if (ds.MaxSizeBytes.HasValue)
+                        {
+                            <span class="badge bg-warning text-dark me-1 mt-1">Max @(ds.MaxSizeBytes.Value / (1024 * 1024)) MB</span>
+                        }
                         @if (ds.Backend.EncryptionMethod != EncryptionMethod.None && _revealedPasswords.TryGetValue(ds.Id, out var pwd))
                         {
                             <div class="mt-1">
@@ -243,6 +247,12 @@ else
             }
         </div>
         <small class="text-muted">Frontend access requires an access ticket. Generate one from your profile page.</small>
+
+        <h6 class="text-muted mb-2 mt-4">Storage Quota</h6>
+        <div class="mb-3">
+            <HxInputNumber Label="Max Size (MB)" @bind-Value="_maxSizeMb" Placeholder="No limit"
+                          Hint="Maximum total size in MB. Leave empty for no limit." />
+        </div>
     </BodyTemplate>
     <FooterTemplate>
         <HxButton Color="ThemeColor.Secondary" OnClick="() => _modal.HideAsync()">Cancel</HxButton>
@@ -276,6 +286,7 @@ else
     private bool _sftpAnon;
     private EncryptionMethod _encryptionMethod = EncryptionMethod.AesCtr256;
     private bool _useCompression;
+    private int? _maxSizeMb;
 
     protected override async Task OnInitializedAsync()
     {
@@ -320,6 +331,7 @@ else
         _sftpAnon = false;
         _encryptionMethod = EncryptionMethod.AesCtr256;
         _useCompression = false;
+        _maxSizeMb = null;
         await _modal.ShowAsync();
     }
 
@@ -348,6 +360,7 @@ else
         _encryptionMethod = ds.Backend.EncryptionMethod;
         _useCompression = ds.Backend.UseCompression;
         _masterPassword = creds?.MasterPassword ?? string.Empty;
+        _maxSizeMb = ds.MaxSizeBytes.HasValue ? (int)(ds.MaxSizeBytes.Value / (1024 * 1024)) : null;
         var ftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Ftp);
         var httpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Http);
         var sftpFrontend = ds.Frontends.FirstOrDefault(f => f.Type == FrontendType.Sftp);
@@ -383,6 +396,7 @@ else
         _sftpAnon = sftpFrontend?.AllowAnonymous ?? false;
         _encryptionMethod = ds.Backend.EncryptionMethod;
         _useCompression = ds.Backend.UseCompression;
+        _maxSizeMb = ds.MaxSizeBytes.HasValue ? (int)(ds.MaxSizeBytes.Value / (1024 * 1024)) : null;
         await _modal.ShowAsync();
     }
 
@@ -431,15 +445,17 @@ else
                 frontends.Add(new FrontendRequest(FrontendType.Sftp, _sftpAnon));
             }
 
+            var maxSizeBytes = _maxSizeMb.HasValue ? (long)_maxSizeMb.Value * 1024 * 1024 : (long?)null;
+
             if (_editId.HasValue)
             {
-                var req = new UpdateDataSourceRequest(_name.Trim(), backend, frontends);
+                var req = new UpdateDataSourceRequest(_name.Trim(), backend, frontends, maxSizeBytes);
                 await Api.UpdateDataSourceAsync(_editId.Value, req);
                 Messenger.AddInformation("Data source updated.");
             }
             else
             {
-                var req = new CreateDataSourceRequest(_name.Trim(), backend, frontends);
+                var req = new CreateDataSourceRequest(_name.Trim(), backend, frontends, maxSizeBytes);
                 await Api.CreateDataSourceAsync(req);
                 Messenger.AddInformation("Data source created.");
             }

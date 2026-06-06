@@ -11,6 +11,12 @@ public sealed class DataSource : IEntity
     public string Name { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// Maximum total size in bytes for all files in this data source.
+    /// Null means no limit.
+    /// </summary>
+    public long? MaxSizeBytes { get; set; }
+
     public BackendConfig Backend { get; set; } = new();
     public List<FrontendConfig> Frontends { get; set; } = [];
 

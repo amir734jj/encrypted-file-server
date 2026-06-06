@@ -59,6 +59,7 @@ public sealed class DataSourceService(IEfRepository repository) : IDataSourceSer
         {
             UserId = userId,
             Name = req.Name.Trim(),
+            MaxSizeBytes = req.MaxSizeBytes,
             Backend = new BackendConfig
             {
                 Protocol = req.Backend.Protocol,
@@ -92,6 +93,7 @@ public sealed class DataSourceService(IEfRepository repository) : IDataSourceSer
         await Dal.Update(id, ds =>
         {
             ds.Name = req.Name.Trim();
+            ds.MaxSizeBytes = req.MaxSizeBytes;
             ds.Backend.Protocol = req.Backend.Protocol;
             ds.Backend.Host = req.Backend.Host;
             ds.Backend.Port = req.Backend.Port;
@@ -153,5 +155,6 @@ public sealed class DataSourceService(IEfRepository repository) : IDataSourceSer
         new(d.Id, d.Name, 0, 0, d.CreatedAt,
             new BackendDto(d.Backend.Protocol, d.Backend.Host, d.Backend.Port, d.Backend.Username,
                 d.Backend.BasePath, d.Backend.UseSsl, d.Backend.EncryptionMethod, d.Backend.UseCompression),
-            d.Frontends.Select(f => new FrontendDto(f.Type, f.AllowAnonymous)).ToList());
+            d.Frontends.Select(f => new FrontendDto(f.Type, f.AllowAnonymous)).ToList(),
+            d.MaxSizeBytes);
 }
