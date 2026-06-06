@@ -194,8 +194,15 @@ public sealed class FilesController(
 
         foreach (var file in toDelete)
         {
+            // Skip directory markers (trailing "/") — we'll remove the directory itself
+            if (file.Path.EndsWith('/'))
+                continue;
             await fileStorage.DeleteFileAsync(ds, file.Path);
         }
+
+        // Remove the directory itself from the backend
+        var dirPath = path.TrimEnd('/');
+        await fileStorage.DeleteDirectoryAsync(ds, dirPath);
 
         return Ok(new { Deleted = toDelete.Count });
     }

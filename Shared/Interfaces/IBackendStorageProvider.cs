@@ -23,6 +23,9 @@ public interface IBackendStorageProvider
     /// <summary>Deletes a file from the remote backend.</summary>
     Task<bool> DeleteAsync(BackendConnectionInfo connection, string storagePath, CancellationToken ct = default);
 
+    /// <summary>Deletes a directory from the remote backend.</summary>
+    Task<bool> DeleteDirectoryAsync(BackendConnectionInfo connection, string storagePath, CancellationToken ct = default);
+
     /// <summary>Checks whether a stored file exists on the remote backend.</summary>
     Task<bool> ExistsAsync(BackendConnectionInfo connection, string storagePath, CancellationToken ct = default);
 

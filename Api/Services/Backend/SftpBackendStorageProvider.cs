@@ -69,6 +69,28 @@ public sealed class SftpBackendStorageProvider(ILogger<SftpBackendStorageProvide
         return Task.FromResult(true);
     }
 
+    public Task<bool> DeleteDirectoryAsync(
+        BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
+    {
+        using var client = Connect(connection);
+
+        if (!storagePath.StartsWith('/'))
+        {
+            var wd = client.WorkingDirectory;
+            storagePath = wd.TrimEnd('/') + "/" + storagePath;
+        }
+
+        if (!client.Exists(storagePath))
+        {
+            logger.LogWarning("SFTP DeleteDirectory: directory not found at {StoragePath}", storagePath);
+            return Task.FromResult(false);
+        }
+
+        client.DeleteDirectory(storagePath);
+        logger.LogInformation("SFTP DeleteDirectory: deleted {StoragePath}", storagePath);
+        return Task.FromResult(true);
+    }
+
     public Task<bool> ExistsAsync(
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {

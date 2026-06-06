@@ -167,6 +167,13 @@ public sealed class FileStorageService(
         return deleted;
     }
 
+    public async Task<bool> DeleteDirectoryAsync(DataSource ds, string relativePath)
+    {
+        var connection = ds.ToBackendConnectionInfo();
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
+        return await storage.DeleteDirectoryAsync(connection, connection.ResolveStoragePath(relativePath));
+    }
+
     public async Task<List<BackendFileEntry>> ListFilesAsync(DataSource ds, CancellationToken ct = default)
     {
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);

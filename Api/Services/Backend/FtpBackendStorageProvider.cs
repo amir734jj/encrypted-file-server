@@ -78,6 +78,28 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         return true;
     }
 
+    public async Task<bool> DeleteDirectoryAsync(
+        BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
+    {
+        using var client = await ConnectAsync(connection, ct);
+
+        if (!storagePath.StartsWith('/'))
+        {
+            var wd = await client.GetWorkingDirectory(ct);
+            storagePath = wd.TrimEnd('/') + "/" + storagePath;
+        }
+
+        if (!await client.DirectoryExists(storagePath, ct))
+        {
+            logger.LogWarning("FTP DeleteDirectory: directory not found at {StoragePath}", storagePath);
+            return false;
+        }
+
+        await client.DeleteDirectory(storagePath, ct);
+        logger.LogInformation("FTP DeleteDirectory: deleted {StoragePath}", storagePath);
+        return true;
+    }
+
     public async Task<bool> ExistsAsync(
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {
