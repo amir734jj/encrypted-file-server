@@ -193,6 +193,24 @@ public sealed class FileStorageService(
             }).Where(f => !string.IsNullOrWhiteSpace(f.Path.TrimEnd('/'))).ToList();
     }
 
+    public async Task<List<BackendFileEntry>> ListFilesRawAsync(DataSource ds, CancellationToken ct = default)
+    {
+        var connection = ds.ToBackendConnectionInfo();
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
+        var files = await storage.ListFilesAsync(connection, ct);
+
+        var basePath = connection.BasePath?.TrimEnd('/');
+        var basePrefix = string.IsNullOrEmpty(basePath) ? null : basePath + "/";
+        return files
+            .Where(f => basePrefix == null || f.path.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
+            .Select(f =>
+            {
+                var path = basePrefix != null ? f.path[basePrefix.Length..] : f.path;
+                path = path.TrimStart('/');
+                return new BackendFileEntry(path, f.size, f.modified);
+            }).Where(f => !string.IsNullOrWhiteSpace(f.Path.TrimEnd('/'))).ToList();
+    }
+
     public async Task<long> GetDecompressedSizeAsync(DataSource ds, string relativePath, CancellationToken ct = default)
     {
         if (!ds.Backend.UseCompression)

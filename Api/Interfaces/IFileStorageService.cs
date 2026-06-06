@@ -23,8 +23,11 @@ public interface IFileStorageService
     /// <summary>Deletes a file from the backend.</summary>
     Task<bool> DeleteFileAsync(DataSource ds, string relativePath);
 
-    /// <summary>Lists all files on the backend storage.</summary>
+    /// <summary>Lists all files on the backend storage (filenames decrypted).</summary>
     Task<List<BackendFileEntry>> ListFilesAsync(DataSource ds, CancellationToken ct = default);
+
+    /// <summary>Lists all files with their raw storage names (no filename decryption).</summary>
+    Task<List<BackendFileEntry>> ListFilesRawAsync(DataSource ds, CancellationToken ct = default);
 
     /// <summary>
     /// Computes the original (decompressed) file size by streaming through the decrypt/decompress

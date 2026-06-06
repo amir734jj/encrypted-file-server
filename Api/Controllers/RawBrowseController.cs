@@ -75,26 +75,90 @@ public sealed class RawBrowseController(
             }
         }
 
-        // Directory listing
-        var backendFiles = await fileStorage.ListFilesAsync(ds!);
-        var entries = backendFiles
-            .Select(f => new EntryViewModel
+        // Directory listing — use raw (non-decrypted) storage names
+        var backendFiles = await fileStorage.ListFilesRawAsync(ds!);
+        var entries = new List<EntryViewModel>();
+        var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var f in backendFiles)
+        {
+            var filePath = f.Path;
+
+            // Skip directory markers and files outside current path
+            if (filePath.EndsWith('/'))
             {
-                Name = System.IO.Path.GetFileName(f.Path) ?? f.Path,
-                Href = $"/raw/{dataSourceId}/{f.Path}",
-                Size = f.StoredSize,
-                Modified = f.Modified ?? DateTimeOffset.UtcNow
-            })
-            .OrderBy(e => e.Name)
+                filePath = filePath[..^1];
+                if (!string.IsNullOrEmpty(path) &&
+                    !filePath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var relDir = string.IsNullOrEmpty(path) ? filePath : filePath[path.Length..];
+                var dirSlash = relDir.IndexOf('/');
+                var dirName = dirSlash < 0 ? relDir : relDir[..dirSlash];
+                if (!string.IsNullOrEmpty(dirName))
+                    seenFolders.Add(dirName);
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(path) &&
+                !filePath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var relativePath = string.IsNullOrEmpty(path) ? filePath : filePath[path.Length..];
+            var slashIndex = relativePath.IndexOf('/');
+
+            if (slashIndex < 0)
+            {
+                entries.Add(new EntryViewModel
+                {
+                    Name = relativePath,
+                    Href = $"/raw/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{relativePath}",
+                    Size = f.StoredSize,
+                    Modified = f.Modified ?? DateTimeOffset.UtcNow
+                });
+            }
+            else
+            {
+                var folderName = relativePath[..slashIndex];
+                if (seenFolders.Add(folderName))
+                {
+                    entries.Add(new EntryViewModel
+                    {
+                        Name = folderName,
+                        Href = $"/raw/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{folderName}/"
+                    });
+                }
+            }
+        }
+
+        // Add folder entries for empty dirs that were only seen as markers
+        foreach (var folder in seenFolders)
+        {
+            if (!entries.Any(e => e.Name.Equals(folder, StringComparison.OrdinalIgnoreCase) && e.Href.EndsWith('/')))
+            {
+                entries.Add(new EntryViewModel
+                {
+                    Name = folder,
+                    Href = $"/raw/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{folder}/"
+                });
+            }
+        }
+
+        entries = entries
+            .OrderBy(e => e.Href.EndsWith('/') ? 0 : 1)
+            .ThenBy(e => e.Name)
             .ToList();
 
-        var displayPath = $"/{ds!.Name}/ (raw)";
+        var displayPath = string.IsNullOrEmpty(path) ? $"/{ds!.Name}/ (raw)" : $"/{ds!.Name}/{path} (raw)";
+        var parentHref = string.IsNullOrEmpty(path)
+            ? "/raw/"
+            : $"/raw/{dataSourceId}/{GetParentPath(path)}";
+
         var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
         {
             Title = $"{displayPath} - Raw Storage",
-            CurrentPath = $"/raw/{dataSourceId}/",
+            CurrentPath = $"/raw/{dataSourceId}/{path}",
             Entries = entries,
-            ParentHref = "/raw/",
+            ParentHref = parentHref,
             Badge = "RAW",
             Subtitle = "Showing raw storage files. Downloads are served as-is without decryption.",
             NameHeader = "Storage Name",
@@ -235,5 +299,12 @@ public sealed class RawBrowseController(
 
         var resolved = string.Join("/", stack.Reverse());
         return resolved.Length > 0 ? resolved + "/" : string.Empty;
+    }
+
+    private static string GetParentPath(string path)
+    {
+        var trimmed = path.TrimEnd('/');
+        var lastSlash = trimmed.LastIndexOf('/');
+        return lastSlash < 0 ? "" : trimmed[..(lastSlash + 1)];
     }
 }
