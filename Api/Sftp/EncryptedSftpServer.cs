@@ -62,7 +62,7 @@ public sealed class EncryptedSftpServer : IDisposable
 
     private void OnConnectionAccepted(object? sender, Session session)
     {
-        _logger.LogDebug("SSH connection accepted");
+        _logger.LogInformation("SSH connection accepted");
 
         Guid? authenticatedUserId = null;
         bool isAnonymous;
@@ -71,9 +71,12 @@ public sealed class EncryptedSftpServer : IDisposable
         {
             if (service is UserauthService userAuth)
             {
-                userAuth.Userauth += async (_, e) =>
+                userAuth.Userauth += (_, e) =>
                 {
-                    var (accepted, userId) = await ValidateCredentials(e.Username, e.Password);
+                    // Must be synchronous — FxSsh reads e.Result immediately after
+                    // raising the event, so an async handler would leave it false.
+                    var (accepted, userId) = ValidateCredentials(e.Username, e.Password)
+                        .GetAwaiter().GetResult();
                     authenticatedUserId = userId;
                     isAnonymous = accepted && !userId.HasValue;
                     e.Result = accepted;
@@ -94,7 +97,7 @@ public sealed class EncryptedSftpServer : IDisposable
                 {
                     if (e.ShellType == "subsystem" && e.CommandText == "sftp")
                     {
-                        _logger.LogDebug("SFTP subsystem requested");
+                        _logger.LogInformation("SFTP subsystem requested");
                         var scope = _scopeFactory.CreateScope();
                         var subsystemId = Guid.NewGuid();
                         var subsystem = new SftpSubsystem(e.Channel, scope, authenticatedUserId, _logger,
