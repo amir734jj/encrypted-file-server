@@ -8,6 +8,14 @@ using Shared.Models;
 
 namespace Api.Services;
 
+public sealed class DataSourceSizeLimitExceededException(long currentSize, long maxSize)
+    : InvalidOperationException(
+        $"Upload would exceed the data source size limit of {maxSize / (1024.0 * 1024):0.##} MB (currently using {currentSize / (1024.0 * 1024):0.##} MB).")
+{
+    public long CurrentSize { get; } = currentSize;
+    public long MaxSize { get; } = maxSize;
+}
+
 /// <summary>
 /// File storage service that uses the backend FTP/SFTP server as the source of truth.
 /// Files are stored with optionally encrypted names. The file content format is:
@@ -20,6 +28,8 @@ public sealed class FileStorageService(
 {
     public async Task StoreFileAsync(DataSource ds, string relativePath, string? contentType, Stream content)
     {
+        await EnforceSizeLimitAsync(ds, content.CanSeek ? content.Length : null);
+
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var connection = ds.ToBackendConnectionInfo();
@@ -55,6 +65,8 @@ public sealed class FileStorageService(
 
     public async Task<StreamingWriteHandle> OpenWriteStreamAsync(DataSource ds, string relativePath, string? contentType)
     {
+        await EnforceSizeLimitAsync(ds, incomingSize: null);
+
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
         var connection = ds.ToBackendConnectionInfo();
@@ -291,6 +303,16 @@ public sealed class FileStorageService(
     {
         var files = await ListFilesAsync(ds, ct);
         return files.Where(f => !f.Path.EndsWith('/')).Sum(f => f.StoredSize);
+    }
+
+    private async Task EnforceSizeLimitAsync(DataSource ds, long? incomingSize)
+    {
+        if (!ds.MaxSizeBytes.HasValue) return;
+
+        var currentSize = await GetTotalStoredSizeAsync(ds);
+        var effectiveIncoming = incomingSize ?? 0;
+        if (currentSize + effectiveIncoming > ds.MaxSizeBytes.Value)
+            throw new DataSourceSizeLimitExceededException(currentSize, ds.MaxSizeBytes.Value);
     }
 
     private static int GetIvSize(EncryptionMethod method) => method switch

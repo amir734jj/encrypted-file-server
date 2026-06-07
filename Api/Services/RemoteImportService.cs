@@ -69,6 +69,14 @@ public sealed class RemoteImportService(IFileStorageService fileStorage) : IRemo
                 await fileStorage.StoreFileAsync(dataSource, storageName, contentType, stream);
                 imported++;
             }
+            catch (DataSourceSizeLimitExceededException ex)
+            {
+                failed++;
+                errors.Add(ex.Message);
+                // No point continuing — all subsequent files will also fail
+                failed += files.Count - (imported + failed);
+                break;
+            }
             catch (Exception ex)
             {
                 failed++;

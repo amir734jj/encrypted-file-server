@@ -1,6 +1,7 @@
 using Api.Data.Entities;
 using Api.Extensions;
 using Api.Interfaces;
+using Api.Services;
 using EfCoreRepository.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -110,26 +111,21 @@ public sealed class FilesController(
         path = NormalizePath(path);
         var fullPath = path + file.FileName;
 
-        // Enforce max data source size
-        if (ds.MaxSizeBytes.HasValue)
-        {
-            var currentSize = await fileStorage.GetTotalStoredSizeAsync(ds);
-            if (currentSize + file.Length > ds.MaxSizeBytes.Value)
-            {
-                var maxMb = ds.MaxSizeBytes.Value / (1024.0 * 1024);
-                var usedMb = currentSize / (1024.0 * 1024);
-                return BadRequest($"Upload would exceed the data source size limit of {maxMb:0.##} MB (currently using {usedMb:0.##} MB).");
-            }
-        }
-
         // Delete existing file with the same name (replace semantics)
         if (await fileStorage.ExistsAsync(ds, fullPath))
         {
             await fileStorage.DeleteFileAsync(ds, fullPath);
         }
 
-        await using var stream = file.OpenReadStream();
-        await fileStorage.StoreFileAsync(ds, fullPath, file.ContentType, stream);
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            await fileStorage.StoreFileAsync(ds, fullPath, file.ContentType, stream);
+        }
+        catch (DataSourceSizeLimitExceededException ex)
+        {
+            return BadRequest(ex.Message);
+        }
 
         MimeMap.TryGetContentType(file.FileName, out var contentType);
 
