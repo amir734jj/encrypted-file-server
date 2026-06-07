@@ -10,6 +10,15 @@ using Shared.Models;
 
 namespace Api.Controllers;
 
+file static class RawPathEncoder
+{
+    public static string EncodePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        return string.Join("/", path.Split('/').Select(s => string.IsNullOrEmpty(s) ? s : Uri.EscapeDataString(s)));
+    }
+}
+
 [ApiController]
 [Route("raw")]
 public sealed class RawBrowseController(
@@ -111,7 +120,7 @@ public sealed class RawBrowseController(
                 entries.Add(new EntryViewModel
                 {
                     Name = relativePath,
-                    Href = $"/raw/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{relativePath}",
+                    Href = $"/raw/{dataSourceId}/{RawPathEncoder.EncodePath((string.IsNullOrEmpty(path) ? "" : path) + relativePath)}",
                     Size = f.StoredSize,
                     Modified = f.Modified ?? DateTimeOffset.UtcNow
                 });
@@ -124,7 +133,7 @@ public sealed class RawBrowseController(
                     entries.Add(new EntryViewModel
                     {
                         Name = folderName,
-                        Href = $"/raw/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{folderName}/"
+                        Href = $"/raw/{dataSourceId}/{RawPathEncoder.EncodePath((string.IsNullOrEmpty(path) ? "" : path) + folderName)}/"
                     });
                 }
             }
@@ -138,7 +147,7 @@ public sealed class RawBrowseController(
                 entries.Add(new EntryViewModel
                 {
                     Name = folder,
-                    Href = $"/raw/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{folder}/"
+                    Href = $"/raw/{dataSourceId}/{RawPathEncoder.EncodePath((string.IsNullOrEmpty(path) ? "" : path) + folder)}/"
                 });
             }
         }
@@ -151,7 +160,7 @@ public sealed class RawBrowseController(
         var displayPath = string.IsNullOrEmpty(path) ? $"/{ds!.Name}/ (raw)" : $"/{ds!.Name}/{path} (raw)";
         var parentHref = string.IsNullOrEmpty(path)
             ? "/raw/"
-            : $"/raw/{dataSourceId}/{GetParentPath(path)}";
+            : $"/raw/{dataSourceId}/{RawPathEncoder.EncodePath(GetParentPath(path))}";
 
         var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
         {

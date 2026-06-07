@@ -12,6 +12,16 @@ using Shared.Models;
 
 namespace Api.Controllers;
 
+// URL-encode each segment of a path while preserving '/' separators.
+file static class PathEncoder
+{
+    public static string EncodePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        return string.Join("/", path.Split('/').Select(s => string.IsNullOrEmpty(s) ? s : Uri.EscapeDataString(s)));
+    }
+}
+
 [Route("browse")]
 public sealed class BrowseController(
     IEfRepository repository,
@@ -133,7 +143,7 @@ public sealed class BrowseController(
             if (slashIndex < 0)
             {
                 var isEncrypted = ds!.Backend.EncryptionMethod != EncryptionMethod.None;
-                var href = $"/browse/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{relativePath}";
+                var href = $"/browse/{dataSourceId}/{PathEncoder.EncodePath((string.IsNullOrEmpty(path) ? "" : path) + relativePath)}";
                 entries.Add(new EntryViewModel
                 {
                     Name = relativePath,
@@ -151,7 +161,7 @@ public sealed class BrowseController(
                     entries.Add(new EntryViewModel
                     {
                         Name = folderName,
-                        Href = $"/browse/{dataSourceId}/{(string.IsNullOrEmpty(path) ? "" : path)}{folderName}/"
+                        Href = $"/browse/{dataSourceId}/{PathEncoder.EncodePath((string.IsNullOrEmpty(path) ? "" : path) + folderName)}/"
                     });
                 }
             }
@@ -165,7 +175,7 @@ public sealed class BrowseController(
         var displayPath = string.IsNullOrEmpty(path) ? $"/{ds!.Name}/" : $"/{ds!.Name}/{path}";
         var parentHref = string.IsNullOrEmpty(path)
             ? "/browse/"
-            : $"/browse/{dataSourceId}/{GetParentPath(path)}";
+            : $"/browse/{dataSourceId}/{PathEncoder.EncodePath(GetParentPath(path))}";
 
         var html = await templateService.RenderDirectoryListingAsync(new DirectoryListingViewModel
         {
