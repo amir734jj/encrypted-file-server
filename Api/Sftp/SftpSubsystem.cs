@@ -6,6 +6,7 @@ using Api.Interfaces;
 using EfCoreRepository.Interfaces;
 using FxSsh;
 using FxSsh.Services;
+using Api.Services;
 using Microsoft.AspNetCore.StaticFiles;
 using Shared.Models;
 using Channel = System.Threading.Channels.Channel;
@@ -377,7 +378,17 @@ public sealed class SftpSubsystem(
             }
 
             var mime = new FileExtensionContentTypeProvider().TryGetContentType(subPath, out var ct) ? ct : null;
-            var ctx = await _fileStorage.OpenWriteStreamAsync(ds, subPath, mime);
+            StreamingWriteHandle ctx;
+            try
+            {
+                ctx = await _fileStorage.OpenWriteStreamAsync(ds, subPath, mime);
+            }
+            catch (DataSourceSizeLimitExceededException ex)
+            {
+                logger.LogWarning("SFTP write denied for {Path}: {Message}", path, ex.Message);
+                SendStatus(id, SSH_FX_FAILURE, ex.Message);
+                return;
+            }
             var handle = NextHandle();
             _handles[handle] = new WriteHandle(ctx);
             Send(BuildHandlePacket(id, handle));

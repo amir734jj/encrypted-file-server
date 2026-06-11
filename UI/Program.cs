@@ -91,7 +91,10 @@ if (auth.IsAuthenticated)
         var me = await api.GetProfileAsync();
         await auth.SetDisplayNameAsync(me.DisplayName);
     }
-    catch { /* token may be expired; ignore */ }
+    catch
+    {
+        await auth.ClearTokenAsync();
+    }
 }
 
 await host.RunAsync();
