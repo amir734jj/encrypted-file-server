@@ -2,6 +2,8 @@
 
 End-to-end encrypted file storage with a Blazor WebAssembly UI, REST API, built-in FTP server, and SFTP server. Files are encrypted at rest on remote FTP backends — the server never stores plaintext.
 
+![image](image.png)
+
 ## Features
 
 - **Multi-provider encryption** — AES-256-CTR (streaming), AES-256-GCM (chunked AEAD), or ChaCha20-Poly1305 (chunked AEAD), selectable per data source
