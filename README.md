@@ -76,6 +76,7 @@ Key settings in `appsettings.json`:
 ```
 
 The SFTP server runs on port 2222 and generates an RSA host key on first start (persisted to `ssh_host_key.pem`).
+The Docker image checks `http://127.0.0.1:3000/api/health` every 30 seconds to report container health.
 
 ## Stack
 
