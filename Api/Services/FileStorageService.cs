@@ -178,13 +178,38 @@ public sealed class FileStorageService(
         var connection = ds.ToBackendConnectionInfo();
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var storageName = EncryptPath(ds, relativePath, masterKey);
-        var deleted = await storage.DeleteAsync(connection, connection.ResolveStoragePath(storageName));
 
-        // Fall back to plain path for files stored before filename encryption
-        if (!deleted && storageName != relativePath)
-            deleted = await storage.DeleteAsync(connection, connection.ResolveStoragePath(relativePath));
+        // Normal case: avoid recursively listing the backend when the filename
+        // was encrypted with the current key.
+        if (await storage.DeleteAsync(connection, connection.ResolveStoragePath(storageName)))
+            return true;
 
-        return deleted;
+        var files = await storage.ListFilesAsync(connection);
+        var basePath = connection.ResolveStoragePath("");
+        var basePrefix = string.IsNullOrEmpty(basePath) ? null : basePath + "/";
+
+        var candidates = files
+            .Where(f => !f.path.EndsWith('/'))
+            .Select(f => new
+            {
+                f.path,
+                RelativePath = GetRelativeStoragePath(f.path, basePrefix)
+            })
+            .Where(f => f.RelativePath is not null)
+            .ToList();
+
+        // Prefer names encrypted with the current key, then exact raw names
+        // (including legacy plaintext names), and finally the display name
+        // produced while listing with a different AES-CTR key.
+        var match = candidates.FirstOrDefault(f =>
+                        f.RelativePath!.Equals(storageName, StringComparison.OrdinalIgnoreCase))
+                    ?? candidates.FirstOrDefault(f =>
+                        f.RelativePath!.Equals(relativePath, StringComparison.OrdinalIgnoreCase))
+                    ?? candidates.FirstOrDefault(f =>
+                        DecryptPath(ds, f.RelativePath!, masterKey)
+                            .Equals(relativePath, StringComparison.OrdinalIgnoreCase));
+
+        return match is not null && await storage.DeleteAsync(connection, match.path);
     }
 
     public async Task<bool> DeleteDirectoryAsync(DataSource ds, string relativePath)
@@ -399,13 +424,41 @@ public sealed class FileStorageService(
             var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
             var iv = DeriveFilenameIv(masterKey, GetIvSize(ds.Backend.EncryptionMethod));
             var base64 = Base64UrlDecode(fileName[EncPrefix.Length..]);
-            return dir + encryption.DecryptString(base64, masterKey, iv);
+            var decryptedFileName = encryption.DecryptString(base64, masterKey, iv);
+            return IsValidFileName(decryptedFileName)
+                ? dir + decryptedFileName
+                : encryptedPath;
         }
-        catch
+        catch (FormatException)
+        {
+            return encryptedPath;
+        }
+        catch (CryptographicException)
+        {
+            return encryptedPath;
+        }
+        catch (ArgumentException)
         {
             return encryptedPath;
         }
     }
+
+    private static string? GetRelativeStoragePath(string storagePath, string? basePrefix)
+    {
+        if (basePrefix is null)
+            return storagePath.TrimStart('/');
+
+        return storagePath.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase)
+            ? storagePath[basePrefix.Length..].TrimStart('/')
+            : null;
+    }
+
+    private static bool IsValidFileName(string fileName) =>
+        !string.IsNullOrWhiteSpace(fileName) &&
+        fileName is not "." and not ".." &&
+        fileName.IndexOfAny(['/', '\\']) < 0 &&
+        !fileName.Any(char.IsControl) &&
+        !fileName.Contains('\uFFFD');
 
     /// <summary>
     /// Derives a deterministic IV/nonce for filename encryption from the master key.

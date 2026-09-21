@@ -7,6 +7,10 @@ namespace Api.Services.Encryption;
 
 public sealed class AesCtrEncryptionProvider : IEncryptionProvider
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     public string ProviderKey => "aes-ctr-256";
 
     public (Stream encryptingStream, byte[] iv) CreateEncryptingStream(Stream destination, byte[] masterKey)
@@ -31,7 +35,7 @@ public sealed class AesCtrEncryptionProvider : IEncryptionProvider
     {
         var bytes = Convert.FromBase64String(ciphertext);
         CtrXor(bytes, masterKey, iv);
-        return Encoding.UTF8.GetString(bytes);
+        return StrictUtf8.GetString(bytes);
     }
 
     private static void CtrXor(byte[] data, byte[] key, byte[] iv)
