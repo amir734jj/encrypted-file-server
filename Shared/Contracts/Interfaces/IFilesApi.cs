@@ -8,9 +8,14 @@ public interface IFilesApi
     [Get("/api/files")]
     Task<DirectoryListingDto> GetAllAsync([Query] Guid dataSourceId, [Query] string path = "");
 
-    [Multipart]
     [Post("/api/files/upload")]
-    Task<FileEntryDto> UploadAsync([Query] Guid dataSourceId, [Query] string path, [AliasAs("file")] StreamPart file);
+    Task<FileEntryDto> UploadAsync(
+        [Query] Guid dataSourceId,
+        [Query] string path,
+        [Query] string fileName,
+        [Query] long fileSize,
+        [Header("Content-Type")] string contentType,
+        [Body] Stream content);
 
     [Delete("/api/files")]
     Task DeleteAsync([Query] Guid dataSourceId, [Query] string path);

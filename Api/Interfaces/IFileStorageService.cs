@@ -9,7 +9,12 @@ namespace Api.Interfaces;
 public interface IFileStorageService
 {
     /// <summary>Stores a file: compress (optional) -> encrypt -> prepend IV -> write to backend.</summary>
-    Task StoreFileAsync(DataSource ds, string relativePath, string? contentType, Stream content);
+    Task StoreFileAsync(
+        DataSource ds,
+        string relativePath,
+        string? contentType,
+        Stream content,
+        long? contentLength = null);
 
     /// <summary>Opens a streaming write pipeline for chunk-by-chunk uploads.</summary>
     Task<StreamingWriteHandle> OpenWriteStreamAsync(DataSource ds, string relativePath, string? contentType);

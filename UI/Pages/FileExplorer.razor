@@ -387,8 +387,8 @@ else
             StateHasChanged();
             try
             {
-                await using var stream = file.OpenReadStream(maxAllowedSize: 500_000_000);
-                await Api.UploadFileAsync(DataSourceId, Path ?? "", stream, file.Name,
+                await using var stream = file.OpenReadStream(maxAllowedSize: long.MaxValue);
+                await Api.UploadFileAsync(DataSourceId, Path ?? "", stream, file.Name, file.Size,
                     file.ContentType ?? "application/octet-stream");
             }
             catch (Exception ex)

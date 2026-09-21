@@ -15,7 +15,8 @@ namespace Api.Controllers;
 [Authorize]
 public sealed class FilesController(
     IEfRepository repository,
-    IFileStorageService fileStorage) : ControllerBase
+    IFileStorageService fileStorage,
+    IGlobalConfigService globalConfigService) : ControllerBase
 {
     private IBasicCrud<DataSource> DataSourceDal => repository.For<DataSource>();
     private Guid CurrentUserId => User.GetUserId();
@@ -94,12 +95,17 @@ public sealed class FilesController(
     }
 
     [HttpPost("upload")]
-    [RequestSizeLimit(500_000_000)]
-    public async Task<IActionResult> Upload([FromQuery] Guid dataSourceId, [FromQuery] string path = "", IFormFile? file = null)
+    [DisableRequestSizeLimit]
+    public async Task<IActionResult> Upload(
+        [FromQuery] Guid dataSourceId,
+        [FromQuery] string fileName,
+        [FromQuery] long fileSize,
+        [FromQuery] string? path = null)
     {
-        if (file is null)
+        fileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(fileName) || fileSize < 0)
         {
-            return BadRequest("No file provided.");
+            return BadRequest("Valid file metadata is required.");
         }
 
         var ds = await GetDataSource(dataSourceId);
@@ -108,30 +114,31 @@ public sealed class FilesController(
             return NotFound("Data source not found.");
         }
 
-        path = NormalizePath(path);
-        var fullPath = path + file.FileName;
-
-        // Delete existing file with the same name (replace semantics)
-        if (await fileStorage.ExistsAsync(ds, fullPath))
+        var config = await globalConfigService.GetAsync();
+        var maxUploadSizeBytes = (long)config.MaxUploadSizeMb * 1024 * 1024;
+        if (config.MaxUploadSizeMb > 0 && fileSize > maxUploadSizeBytes)
         {
-            await fileStorage.DeleteFileAsync(ds, fullPath);
+            return BadRequest(
+                $"File size exceeds the configured maximum upload size of {config.MaxUploadSizeMb} MB.");
         }
+
+        path = NormalizePath(path);
+        var fullPath = path + fileName;
 
         try
         {
-            await using var stream = file.OpenReadStream();
-            await fileStorage.StoreFileAsync(ds, fullPath, file.ContentType, stream);
+            await fileStorage.StoreFileAsync(ds, fullPath, Request.ContentType, Request.Body, fileSize);
         }
         catch (DataSourceSizeLimitExceededException ex)
         {
             return BadRequest(ex.Message);
         }
 
-        MimeMap.TryGetContentType(file.FileName, out var contentType);
+        MimeMap.TryGetContentType(fileName, out var contentType);
 
         return Ok(new FileEntryDto(
-            dataSourceId, file.FileName, contentType ?? file.ContentType,
-            file.Length, DateTimeOffset.UtcNow));
+            dataSourceId, fileName, contentType ?? Request.ContentType,
+            fileSize, DateTimeOffset.UtcNow));
     }
 
     [HttpGet("download")]

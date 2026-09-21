@@ -93,11 +93,14 @@ public sealed class ApiService(
     public Task<DirectoryListingDto> GetFilesAsync(Guid dataSourceId, string path = "")
         => filesApi.GetAllAsync(dataSourceId, path);
 
-    public async Task<FileEntryDto> UploadFileAsync(Guid dataSourceId, string path, Stream fileStream, string fileName, string contentType)
-    {
-        var streamPart = new StreamPart(fileStream, fileName, contentType);
-        return await filesApi.UploadAsync(dataSourceId, path, streamPart);
-    }
+    public Task<FileEntryDto> UploadFileAsync(
+        Guid dataSourceId,
+        string path,
+        Stream fileStream,
+        string fileName,
+        long fileSize,
+        string contentType) =>
+        filesApi.UploadAsync(dataSourceId, path, fileName, fileSize, contentType, fileStream);
 
     public Task DeleteFileAsync(Guid dataSourceId, string path) => filesApi.DeleteAsync(dataSourceId, path);
     public Task DeleteFolderAsync(Guid dataSourceId, string path) => filesApi.DeleteFolderAsync(dataSourceId, path);

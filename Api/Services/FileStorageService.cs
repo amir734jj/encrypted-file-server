@@ -26,9 +26,17 @@ public sealed class FileStorageService(
     IEncryptionProviderFactory encryptionFactory,
     IBackendStorageProviderFactory storageFactory) : IFileStorageService
 {
-    public async Task StoreFileAsync(DataSource ds, string relativePath, string? contentType, Stream content)
+    public async Task StoreFileAsync(
+        DataSource ds,
+        string relativePath,
+        string? contentType,
+        Stream content,
+        long? contentLength = null)
     {
-        await EnforceSizeLimitAsync(ds, content.CanSeek ? content.Length : null);
+        await EnforceSizeLimitAsync(
+            ds,
+            contentLength ?? (content.CanSeek ? content.Length : null),
+            relativePath);
 
         var encryption = encryptionFactory.GetProvider(ds.Backend.EncryptionMethod);
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
@@ -312,13 +320,23 @@ public sealed class FileStorageService(
         return files.Where(f => !f.Path.EndsWith('/')).Sum(f => f.StoredSize);
     }
 
-    private async Task EnforceSizeLimitAsync(DataSource ds, long? incomingSize)
+    private async Task EnforceSizeLimitAsync(
+        DataSource ds,
+        long? incomingSize,
+        string? replacedRelativePath = null)
     {
         if (!ds.MaxSizeBytes.HasValue) return;
 
-        var currentSize = await GetTotalStoredSizeAsync(ds);
+        var files = await ListFilesAsync(ds);
+        var currentSize = files
+            .Where(f => !f.Path.EndsWith('/'))
+            .Sum(f => f.StoredSize);
+        var replacedSize = replacedRelativePath is null
+            ? 0
+            : files.FirstOrDefault(f =>
+                f.Path.Equals(replacedRelativePath, StringComparison.OrdinalIgnoreCase))?.StoredSize ?? 0;
         var effectiveIncoming = incomingSize ?? 0;
-        if (currentSize + effectiveIncoming > ds.MaxSizeBytes.Value)
+        if (currentSize - replacedSize + effectiveIncoming > ds.MaxSizeBytes.Value)
             throw new DataSourceSizeLimitExceededException(currentSize, ds.MaxSizeBytes.Value);
     }
 
