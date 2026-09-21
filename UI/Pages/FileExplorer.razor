@@ -67,6 +67,9 @@
         }
     </div>
     <div class="d-flex gap-2">
+        <HxButton Color="ThemeColor.Secondary" Size="ButtonSize.Small" Outline="true" OnClick="ShowCreateFolder">
+            <i class="bi bi-folder-plus me-1"></i> New Folder
+        </HxButton>
         @if (_listing is not null && (_listing.Folders.Count > 0 || _listing.Files.Count > 0))
         {
             <HxButton Color="ThemeColor.Danger" Size="ButtonSize.Small" Outline="true" OnClick="DeleteAll">
@@ -183,6 +186,34 @@ else
     </small>
 }
 
+@if (_creatingFolder)
+{
+    <div class="modal show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Folder</h5>
+                    <button type="button" class="btn-close" @onclick="CancelCreateFolder"></button>
+                </div>
+                <div class="modal-body">
+                    <HxInputText Label="Folder name" @bind-Value="_newFolderName" />
+                </div>
+                <div class="modal-footer">
+                    <HxButton Color="ThemeColor.Secondary" OnClick="CancelCreateFolder">Cancel</HxButton>
+                    <HxButton Color="ThemeColor.Primary" OnClick="CreateFolder"
+                              Enabled="@(!string.IsNullOrWhiteSpace(_newFolderName) && !_creatingFolderRequest)">
+                        @if (_creatingFolderRequest)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        <i class="bi bi-folder-plus me-1"></i> Create
+                    </HxButton>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @if (_movingFolder is not null)
 {
     <div class="modal show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
@@ -237,6 +268,9 @@ else
     private int _uploadInputKey;
     private FolderEntryDto? _movingFolder;
     private string? _moveDestination;
+    private bool _creatingFolder;
+    private bool _creatingFolderRequest;
+    private string _newFolderName = string.Empty;
     private string? _dataSourceName;
     private DataSourceSizeDto? _sizeInfo;
 
@@ -296,6 +330,50 @@ else
             ? $"/files/{DataSourceId}"
             : $"/files/{DataSourceId}/{folderPath}";
         Nav.NavigateTo(url);
+    }
+
+    private void ShowCreateFolder()
+    {
+        _newFolderName = string.Empty;
+        _creatingFolder = true;
+    }
+
+    private void CancelCreateFolder()
+    {
+        if (_creatingFolderRequest)
+        {
+            return;
+        }
+
+        _creatingFolder = false;
+        _newFolderName = string.Empty;
+    }
+
+    private async Task CreateFolder()
+    {
+        var name = _newFolderName.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            return;
+        }
+
+        _creatingFolderRequest = true;
+        try
+        {
+            await Api.CreateFolderAsync(DataSourceId, Path ?? "", name);
+            _creatingFolder = false;
+            _newFolderName = string.Empty;
+            await LoadAsync();
+            Messenger.AddInformation("Folder created.");
+        }
+        catch (Exception ex)
+        {
+            Messenger.AddError($"Failed to create folder: {ex.Message}");
+        }
+        finally
+        {
+            _creatingFolderRequest = false;
+        }
     }
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)

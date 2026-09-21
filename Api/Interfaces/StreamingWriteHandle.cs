@@ -18,9 +18,25 @@ public sealed class StreamingWriteHandle(
     /// <summary>Flushes compression/encryption and closes the backend stream.</summary>
     public async Task CompleteAsync()
     {
-        _completed = true;
-        await writeStream.DisposeAsync();
-        await backendStream.DisposeAsync();
+        if (_completed)
+            return;
+
+        try
+        {
+            await writeStream.DisposeAsync();
+        }
+        finally
+        {
+            try
+            {
+                await backendStream.DisposeAsync();
+            }
+            finally
+            {
+                _completed = true;
+            }
+        }
+
         if (onComplete is not null)
         {
             await onComplete();

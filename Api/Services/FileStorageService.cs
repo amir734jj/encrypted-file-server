@@ -186,6 +186,13 @@ public sealed class FileStorageService(
         return await storage.DeleteDirectoryAsync(connection, connection.ResolveStoragePath(relativePath));
     }
 
+    public async Task CreateDirectoryAsync(DataSource ds, string relativePath)
+    {
+        var connection = ds.ToBackendConnectionInfo();
+        var storage = storageFactory.GetProvider(ds.Backend.Protocol);
+        await storage.CreateDirectoryAsync(connection, connection.ResolveStoragePath(relativePath));
+    }
+
     public async Task<List<BackendFileEntry>> ListFilesAsync(DataSource ds, CancellationToken ct = default)
     {
         var masterKey = KeyDerivation.DeriveKey(ds.Backend.MasterPassword);
@@ -193,7 +200,7 @@ public sealed class FileStorageService(
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var files = await storage.ListFilesAsync(connection, ct);
 
-        var basePath = connection.BasePath?.TrimEnd('/');
+        var basePath = connection.ResolveStoragePath("");
         var basePrefix = string.IsNullOrEmpty(basePath) ? null : basePath + "/";
         return files
             .Where(f => basePrefix == null || f.path.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
@@ -218,7 +225,7 @@ public sealed class FileStorageService(
         var storage = storageFactory.GetProvider(ds.Backend.Protocol);
         var files = await storage.ListFilesAsync(connection, ct);
 
-        var basePath = connection.BasePath?.TrimEnd('/');
+        var basePath = connection.ResolveStoragePath("");
         var basePrefix = string.IsNullOrEmpty(basePath) ? null : basePath + "/";
         return files
             .Where(f => basePrefix == null || f.path.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))

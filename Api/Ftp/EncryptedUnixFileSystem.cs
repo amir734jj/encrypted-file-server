@@ -68,11 +68,28 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 }
 
                 var relativePath = string.IsNullOrEmpty(currentPath) ? f.Path : f.Path[currentPath.Length..];
+                var isDirectoryMarker = relativePath.EndsWith('/');
+                relativePath = relativePath.TrimEnd('/');
+                if (string.IsNullOrEmpty(relativePath))
+                {
+                    continue;
+                }
+
                 var slashIndex = relativePath.IndexOf('/');
 
                 if (slashIndex < 0)
                 {
-                    results.Add(new VirtualFileEntry(dsId, f.Path, relativePath, f.StoredSize, f.Modified));
+                    if (isDirectoryMarker)
+                    {
+                        if (seenFolders.Add(relativePath))
+                        {
+                            results.Add(new VirtualDirectoryEntry(relativePath, dsId, currentPath + relativePath + "/"));
+                        }
+                    }
+                    else
+                    {
+                        results.Add(new VirtualFileEntry(dsId, f.Path, relativePath, f.StoredSize, f.Modified));
+                    }
                 }
                 else
                 {
@@ -134,16 +151,24 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 }
 
                 var relativePath = string.IsNullOrEmpty(currentPath) ? f.Path : f.Path[currentPath.Length..];
+                var isDirectoryMarker = relativePath.EndsWith('/');
+                relativePath = relativePath.TrimEnd('/');
+                if (string.IsNullOrEmpty(relativePath))
+                {
+                    continue;
+                }
+
                 var slashIndex = relativePath.IndexOf('/');
 
-                if (slashIndex < 0 && string.Equals(relativePath, name, StringComparison.OrdinalIgnoreCase))
+                if (!isDirectoryMarker && slashIndex < 0 &&
+                    string.Equals(relativePath, name, StringComparison.OrdinalIgnoreCase))
                 {
                     return new VirtualFileEntry(dsId, f.Path, relativePath, f.StoredSize, f.Modified);
                 }
 
-                if (slashIndex >= 0)
+                if (isDirectoryMarker || slashIndex >= 0)
                 {
-                    var folderName = relativePath[..slashIndex];
+                    var folderName = slashIndex >= 0 ? relativePath[..slashIndex] : relativePath;
                     if (string.Equals(folderName, name, StringComparison.OrdinalIgnoreCase))
                     {
                         return new VirtualDirectoryEntry(folderName, dsId, currentPath + folderName + "/");
@@ -258,19 +283,21 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 var allFiles = await _fileStorage.ListFilesAsync(ds, ct);
                 foreach (var f in allFiles)
                 {
-                    if (f.Path.StartsWith(vde.VirtualPath, StringComparison.OrdinalIgnoreCase))
+                    if (!f.Path.EndsWith('/') &&
+                        f.Path.StartsWith(vde.VirtualPath, StringComparison.OrdinalIgnoreCase))
                     {
                         await _fileStorage.DeleteFileAsync(ds, f.Path);
                     }
                 }
 
+                await _fileStorage.DeleteDirectoryAsync(ds, vde.VirtualPath.TrimEnd('/'));
                 _sessionDirs.RemoveWhere(e => e.dsId == dsId &&
                     e.virtualPath.StartsWith(vde.VirtualPath, StringComparison.OrdinalIgnoreCase));
             }
         }
     }
 
-    public Task<IUnixDirectoryEntry> CreateDirectoryAsync(
+    public async Task<IUnixDirectoryEntry> CreateDirectoryAsync(
         IUnixDirectoryEntry targetDirectory, string directoryName, CancellationToken ct)
     {
         EnsureAuthenticated();
@@ -278,8 +305,11 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
         if (targetDirectory is VirtualDirectoryEntry { DataSourceId: { } dsId } vde)
         {
             var newPath = (vde.VirtualPath ?? "") + directoryName + "/";
+            var ds = await GetDataSourceAsync(dsId)
+                ?? throw new InvalidOperationException("Data source not found.");
+            await _fileStorage.CreateDirectoryAsync(ds, newPath.TrimEnd('/'));
             _sessionDirs.Add((dsId, newPath));
-            return Task.FromResult<IUnixDirectoryEntry>(new VirtualDirectoryEntry(directoryName, dsId, newPath));
+            return new VirtualDirectoryEntry(directoryName, dsId, newPath);
         }
 
         throw new NotSupportedException("Data sources cannot be created via FTP.");
@@ -331,6 +361,7 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
 
             var newPrefix = targetPath + fileName + "/";
             var allFiles = await _fileStorage.ListFilesAsync(ds, ct);
+            var sourceDirectories = new List<string>();
 
             foreach (var f in allFiles)
             {
@@ -340,8 +371,23 @@ public sealed class EncryptedUnixFileSystem(IServiceScope scope, Guid? userId) :
                 }
 
                 var newPath = newPrefix + f.Path[oldPrefix.Length..];
-                await _fileStorage.RenameFileAsync(ds, f.Path, newPath);
+                if (f.Path.EndsWith('/'))
+                {
+                    await _fileStorage.CreateDirectoryAsync(ds, newPath.TrimEnd('/'));
+                    sourceDirectories.Add(f.Path.TrimEnd('/'));
+                }
+                else
+                {
+                    await _fileStorage.RenameFileAsync(ds, f.Path, newPath);
+                }
             }
+
+            foreach (var directory in sourceDirectories.OrderByDescending(p => p.Length))
+            {
+                await _fileStorage.DeleteDirectoryAsync(ds, directory);
+            }
+
+            await _fileStorage.DeleteDirectoryAsync(ds, oldPrefix.TrimEnd('/'));
 
             // Update session-tracked dirs
             var oldDirs = _sessionDirs.Where(e => e.dsId == sourceDsId &&

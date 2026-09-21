@@ -100,6 +100,16 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         return true;
     }
 
+    public async Task CreateDirectoryAsync(
+        BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
+    {
+        using var client = await ConnectAsync(connection, ct);
+        if (!await client.DirectoryExists(storagePath, ct))
+        {
+            await client.CreateDirectory(storagePath, true, ct);
+        }
+    }
+
     public async Task<bool> ExistsAsync(
         BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
     {
@@ -141,70 +151,55 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
     {
         using var client = await ConnectAsync(connection, ct);
 
-        // Use the FTP working directory (user's home) rather than BasePath,
-        // because BasePath="/" would traverse the entire filesystem.
-        var workingDir = await client.GetWorkingDirectory(ct);
-        var listRoot = string.IsNullOrWhiteSpace(workingDir) || workingDir == "/"
-            ? (string.IsNullOrWhiteSpace(connection.BasePath) || connection.BasePath == "/" ? "." : connection.BasePath)
-            : workingDir;
+        var storageRoot = connection.ResolveStoragePath("");
+        var listRoot = string.IsNullOrEmpty(storageRoot) ? "." : storageRoot;
 
-        logger.LogInformation("FTP ListFiles: BasePath={BasePath}, WorkingDir={Pwd}, ListRoot={ListRoot}",
-            connection.BasePath, workingDir, listRoot);
+        logger.LogInformation("FTP ListFiles: BasePath={BasePath}, ListRoot={ListRoot}",
+            connection.BasePath, listRoot);
 
         var results = new List<(string path, long size, DateTimeOffset? modified)>();
-        await ListFtpRecursiveAsync(client, listRoot, results, logger, ct);
-
-        // Make paths relative to the listing root so that ResolveStoragePath
-        // can reconstruct correct paths relative to the FTP working directory.
-        var normalizedRoot = listRoot.TrimEnd('/');
-        if (!string.IsNullOrEmpty(normalizedRoot) && normalizedRoot != ".")
-        {
-            var rootPrefix = normalizedRoot + "/";
-            for (var i = 0; i < results.Count; i++)
-            {
-                var (p, s, m) = results[i];
-                if (p.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    results[i] = (p[rootPrefix.Length..], s, m);
-                }
-            }
-        }
+        await ListFtpRecursiveAsync(client, listRoot, storageRoot, results, logger, ct);
 
         logger.LogInformation("FTP ListFiles found {Count} files", results.Count);
         return results;
     }
 
     private static async Task ListFtpRecursiveAsync(
-        AsyncFtpClient client, string path, List<(string path, long size, DateTimeOffset? modified)> results,
+        AsyncFtpClient client, string remotePath, string storagePath,
+        List<(string path, long size, DateTimeOffset? modified)> results,
         ILogger logger, CancellationToken ct)
     {
         FtpListItem[] items;
         try
         {
-            items = await client.GetListing(path, ct);
+            items = await client.GetListing(remotePath, ct);
         }
         catch (Exception ex)
         {
-            logger.LogWarning("FTP GetListing({Path}) failed: {Error}", path, ex.Message);
+            logger.LogWarning("FTP GetListing({Path}) failed: {Error}", remotePath, ex.Message);
             return;
         }
 
-        logger.LogInformation("FTP GetListing({Path}) returned {Count} items", path, items.Length);
+        logger.LogInformation("FTP GetListing({Path}) returned {Count} items", remotePath, items.Length);
         foreach (var item in items)
         {
+            var itemStoragePath = string.IsNullOrEmpty(storagePath)
+                ? item.Name
+                : $"{storagePath.TrimEnd('/')}/{item.Name}";
+
             if (item.Type == FtpObjectType.File)
             {
-                results.Add((item.FullName, item.Size,
+                results.Add((itemStoragePath, item.Size,
                     item.Modified != DateTime.MinValue ? new DateTimeOffset(item.Modified, TimeSpan.Zero) : null));
             }
             else if (item.Type == FtpObjectType.Directory)
             {
-                await ListFtpRecursiveAsync(client, item.FullName, results, logger, ct);
+                var countBefore = results.Count;
+                await ListFtpRecursiveAsync(client, item.FullName, itemStoragePath, results, logger, ct);
 
-                // Emit a marker for empty directories so they appear in listings
-                if (!results.Any(r => r.path.StartsWith(item.FullName + "/", StringComparison.Ordinal)))
+                if (results.Count == countBefore)
                 {
-                    results.Add((item.FullName + "/", -1, null));
+                    results.Add((itemStoragePath + "/", -1, null));
                 }
             }
         }

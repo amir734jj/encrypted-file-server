@@ -26,6 +26,9 @@ public interface IFileStorageService
     /// <summary>Deletes a directory from the backend (must be empty).</summary>
     Task<bool> DeleteDirectoryAsync(DataSource ds, string relativePath);
 
+    /// <summary>Creates a directory and any missing parent directories on the backend.</summary>
+    Task CreateDirectoryAsync(DataSource ds, string relativePath);
+
     /// <summary>Lists all files on the backend storage (filenames decrypted).</summary>
     Task<List<BackendFileEntry>> ListFilesAsync(DataSource ds, CancellationToken ct = default);
 

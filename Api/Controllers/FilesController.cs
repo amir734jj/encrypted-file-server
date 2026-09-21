@@ -215,6 +215,41 @@ public sealed class FilesController(
         return Ok(new { Deleted = toDelete.Count });
     }
 
+    [HttpPost("folder")]
+    public async Task<IActionResult> CreateFolder(
+        [FromQuery] Guid dataSourceId,
+        [FromQuery] string path,
+        [FromQuery] string name)
+    {
+        name = name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name) ||
+            name is "." or ".." ||
+            name.IndexOfAny(['/', '\\']) >= 0 ||
+            name.Any(char.IsControl))
+        {
+            return BadRequest("Folder name is invalid.");
+        }
+
+        var ds = await GetDataSource(dataSourceId);
+        if (ds is null)
+        {
+            return NotFound();
+        }
+
+        var parentPath = NormalizePath(path);
+        var folderPath = parentPath + name;
+        var existing = await fileStorage.ListFilesAsync(ds);
+        if (existing.Any(f =>
+                f.Path.TrimEnd('/').Equals(folderPath, StringComparison.OrdinalIgnoreCase) ||
+                f.Path.StartsWith(folderPath + "/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Conflict("A file or folder with that name already exists.");
+        }
+
+        await fileStorage.CreateDirectoryAsync(ds, folderPath);
+        return NoContent();
+    }
+
     [HttpPost("move-folder")]
     public async Task<IActionResult> MoveFolder(
         [FromQuery] Guid dataSourceId,
@@ -242,6 +277,7 @@ public sealed class FilesController(
 
         var allFiles = await fileStorage.ListFilesAsync(ds);
         var moved = 0;
+        var sourceDirectories = new List<string>();
 
         foreach (var f in allFiles)
         {
@@ -251,8 +287,26 @@ public sealed class FilesController(
             }
 
             var newPath = destinationPath + f.Path[sourcePath.Length..];
-            await fileStorage.RenameFileAsync(ds, f.Path, newPath);
+            if (f.Path.EndsWith('/'))
+            {
+                await fileStorage.CreateDirectoryAsync(ds, newPath.TrimEnd('/'));
+                sourceDirectories.Add(f.Path.TrimEnd('/'));
+            }
+            else
+            {
+                await fileStorage.RenameFileAsync(ds, f.Path, newPath);
+            }
             moved++;
+        }
+
+        foreach (var directory in sourceDirectories.OrderByDescending(p => p.Length))
+        {
+            await fileStorage.DeleteDirectoryAsync(ds, directory);
+        }
+
+        if (moved > 0)
+        {
+            await fileStorage.DeleteDirectoryAsync(ds, sourcePath.TrimEnd('/'));
         }
 
         return Ok(new { Moved = moved });

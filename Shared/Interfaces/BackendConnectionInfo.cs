@@ -14,8 +14,13 @@ public record BackendConnectionInfo(
     bool UseSsl,
     BackendStorageType Protocol = BackendStorageType.FtpClient)
 {
-    public string ResolveStoragePath(string relativePath) =>
-        string.IsNullOrWhiteSpace(BasePath)
-            ? relativePath
-            : $"{BasePath.TrimEnd('/')}/{relativePath}";
+    public string ResolveStoragePath(string relativePath)
+    {
+        var basePath = (BasePath ?? string.Empty).Replace('\\', '/').Trim('/');
+        var path = relativePath.Replace('\\', '/').TrimStart('/');
+
+        return string.IsNullOrEmpty(basePath)
+            ? path
+            : string.IsNullOrEmpty(path) ? basePath : $"{basePath}/{path}";
+    }
 }

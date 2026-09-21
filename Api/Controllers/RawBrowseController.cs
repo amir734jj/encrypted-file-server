@@ -72,11 +72,15 @@ public sealed class RawBrowseController(
 
         path = NormalizePath(path);
         var trimmedPath = path.TrimEnd('/');
+        var backendFiles = await fileStorage.ListFilesRawAsync(ds!);
 
         // If path points to a file, serve raw bytes
         if (!string.IsNullOrEmpty(trimmedPath))
         {
-            if (await fileStorage.ExistsAsync(ds!, trimmedPath))
+            var matchingFile = backendFiles.FirstOrDefault(f =>
+                !f.Path.EndsWith('/') &&
+                f.Path.Equals(trimmedPath, StringComparison.OrdinalIgnoreCase));
+            if (matchingFile is not null)
             {
                 var rawStream = await fileStorage.OpenRawStreamAsync(ds!, trimmedPath);
                 var rawFileName = System.IO.Path.GetFileName(trimmedPath);
@@ -85,7 +89,6 @@ public sealed class RawBrowseController(
         }
 
         // Directory listing — use raw (non-decrypted) storage names
-        var backendFiles = await fileStorage.ListFilesRawAsync(ds!);
         var entries = new List<EntryViewModel>();
         var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 

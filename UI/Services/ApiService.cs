@@ -101,6 +101,7 @@ public sealed class ApiService(
 
     public Task DeleteFileAsync(Guid dataSourceId, string path) => filesApi.DeleteAsync(dataSourceId, path);
     public Task DeleteFolderAsync(Guid dataSourceId, string path) => filesApi.DeleteFolderAsync(dataSourceId, path);
+    public Task CreateFolderAsync(Guid dataSourceId, string path, string name) => filesApi.CreateFolderAsync(dataSourceId, path, name);
     public Task MoveFolderAsync(Guid dataSourceId, string sourcePath, string destinationPath) => filesApi.MoveFolderAsync(dataSourceId, sourcePath, destinationPath);
     public Task<DataSourceSizeDto> GetDataSourceSizeAsync(Guid dataSourceId) => filesApi.GetSizeAsync(dataSourceId);
 

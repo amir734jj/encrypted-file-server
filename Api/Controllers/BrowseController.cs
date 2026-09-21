@@ -131,13 +131,40 @@ public sealed class BrowseController(
 
         foreach (var f in backendFiles)
         {
+            var filePath = f.Path;
+
+            if (filePath.EndsWith('/'))
+            {
+                filePath = filePath[..^1];
+                if (!string.IsNullOrEmpty(path) &&
+                    !filePath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var relativeDirectory = string.IsNullOrEmpty(path) ? filePath : filePath[path.Length..];
+                var directorySlashIndex = relativeDirectory.IndexOf('/');
+                var folderName = directorySlashIndex < 0
+                    ? relativeDirectory
+                    : relativeDirectory[..directorySlashIndex];
+                if (!string.IsNullOrEmpty(folderName) && seenFolders.Add(folderName))
+                {
+                    entries.Add(new EntryViewModel
+                    {
+                        Name = folderName,
+                        Href = $"/browse/{dataSourceId}/{PathEncoder.EncodePath((string.IsNullOrEmpty(path) ? "" : path) + folderName)}/"
+                    });
+                }
+                continue;
+            }
+
             if (!string.IsNullOrEmpty(path) &&
-                !f.Path.StartsWith(path, StringComparison.OrdinalIgnoreCase))
+                !filePath.StartsWith(path, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var relativePath = string.IsNullOrEmpty(path) ? f.Path : f.Path[path.Length..];
+            var relativePath = string.IsNullOrEmpty(path) ? filePath : filePath[path.Length..];
             var slashIndex = relativePath.IndexOf('/');
 
             if (slashIndex < 0)
@@ -327,4 +354,3 @@ public sealed class BrowseController(
         return lastSlash < 0 ? "" : trimmed[..(lastSlash + 1)];
     }
 }
-

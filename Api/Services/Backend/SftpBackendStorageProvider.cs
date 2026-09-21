@@ -86,9 +86,17 @@ public sealed class SftpBackendStorageProvider(ILogger<SftpBackendStorageProvide
             return Task.FromResult(false);
         }
 
-        client.DeleteDirectory(storagePath);
+        DeleteDirectoryRecursive(client, storagePath);
         logger.LogInformation("SFTP DeleteDirectory: deleted {StoragePath}", storagePath);
         return Task.FromResult(true);
+    }
+
+    public Task CreateDirectoryAsync(
+        BackendConnectionInfo connection, string storagePath, CancellationToken ct = default)
+    {
+        using var client = Connect(connection);
+        EnsureDirectoryExists(client, storagePath);
+        return Task.CompletedTask;
     }
 
     public Task<bool> ExistsAsync(
@@ -119,38 +127,42 @@ public sealed class SftpBackendStorageProvider(ILogger<SftpBackendStorageProvide
     {
         using var client = Connect(connection);
 
-        // Use the SFTP working directory (user's home) rather than BasePath,
-        // because BasePath="/" would traverse the entire filesystem.
-        var workingDir = client.WorkingDirectory;
-        var listRoot = string.IsNullOrWhiteSpace(workingDir) || workingDir == "/"
-            ? (string.IsNullOrWhiteSpace(connection.BasePath) || connection.BasePath == "/" ? "." : connection.BasePath)
-            : workingDir;
+        var storageRoot = connection.ResolveStoragePath("");
+        var listRoot = string.IsNullOrEmpty(storageRoot) ? "." : storageRoot;
 
         var results = new List<(string path, long size, DateTimeOffset? modified)>();
-        ListFilesRecursive(client, listRoot, results);
+        ListFilesRecursive(client, listRoot, storageRoot, results);
         return Task.FromResult(results);
     }
 
-    private static void ListFilesRecursive(SftpClient client, string path, List<(string path, long size, DateTimeOffset? modified)> results)
+    private static void ListFilesRecursive(
+        SftpClient client,
+        string remotePath,
+        string storagePath,
+        List<(string path, long size, DateTimeOffset? modified)> results)
     {
-        foreach (var item in client.ListDirectory(path))
+        foreach (var item in client.ListDirectory(remotePath))
         {
             if (item.Name == "." || item.Name == "..")
                 continue;
 
+            var itemStoragePath = string.IsNullOrEmpty(storagePath)
+                ? item.Name
+                : $"{storagePath.TrimEnd('/')}/{item.Name}";
+
             if (item.IsDirectory)
             {
-                ListFilesRecursive(client, item.FullName, results);
+                var countBefore = results.Count;
+                ListFilesRecursive(client, item.FullName, itemStoragePath, results);
 
-                // Emit a marker for empty directories so they appear in listings
-                if (!results.Any(r => r.path.StartsWith(item.FullName + "/", StringComparison.Ordinal)))
+                if (results.Count == countBefore)
                 {
-                    results.Add((item.FullName + "/", -1, null));
+                    results.Add((itemStoragePath + "/", -1, null));
                 }
             }
             else if (item.IsRegularFile)
             {
-                results.Add((item.FullName, item.Length,
+                results.Add((itemStoragePath, item.Length,
                     item.LastWriteTimeUtc != DateTime.MinValue ? new DateTimeOffset(item.LastWriteTimeUtc, TimeSpan.Zero) : null));
             }
         }
@@ -165,16 +177,35 @@ public sealed class SftpBackendStorageProvider(ILogger<SftpBackendStorageProvide
 
     private static void EnsureDirectoryExists(SftpClient client, string path)
     {
+        var isAbsolute = path.StartsWith('/');
         var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var current = "";
+        var current = isAbsolute ? "/" : "";
         foreach (var part in parts)
         {
-            current += $"/{part}";
+            current = current == "/"
+                ? $"/{part}"
+                : string.IsNullOrEmpty(current) ? part : $"{current}/{part}";
             if (!client.Exists(current))
             {
                 client.CreateDirectory(current);
             }
         }
+    }
+
+    private static void DeleteDirectoryRecursive(SftpClient client, string path)
+    {
+        foreach (var item in client.ListDirectory(path))
+        {
+            if (item.Name is "." or "..")
+                continue;
+
+            if (item.IsDirectory)
+                DeleteDirectoryRecursive(client, item.FullName);
+            else
+                client.DeleteFile(item.FullName);
+        }
+
+        client.DeleteDirectory(path);
     }
 
     private sealed class SftpWriteStream(Stream inner, SftpClient client) : Stream

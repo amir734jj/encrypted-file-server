@@ -29,7 +29,7 @@ public sealed class SftpSubsystem(
     private const int MaxEntriesPerReaddir = 100;
 
     private sealed record DirHandle(List<VfsEntry> Entries, int Offset);
-    private sealed record ReadHandle(DataSource Ds, string RelativePath, Stream Stream, long Position);
+    private sealed record ReadHandle(DataSource Ds, string RelativePath, Stream Stream, long Position, long Size);
     private sealed class WriteHandle(StreamingWriteHandle context)
     {
         public StreamingWriteHandle Context { get; } = context;
@@ -72,7 +72,15 @@ public sealed class SftpSubsystem(
                 while (TryReadPacket(out var type, out var payload))
                 {
                     try { await HandlePacketAsync(type, payload); }
-                    catch (Exception ex) { logger.LogError(ex, "Error processing SFTP packet type {Type}", type); }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Error processing SFTP packet type {Type}", type);
+                        if (type != SSH_FXP_INIT && payload.Length >= sizeof(uint))
+                        {
+                            var requestId = BinaryPrimitives.ReadUInt32BigEndian(payload);
+                            SendStatus(requestId, SSH_FX_FAILURE, "SFTP operation failed");
+                        }
+                    }
                 }
             }
         }
@@ -255,8 +263,8 @@ public sealed class SftpSubsystem(
             switch (h)
             {
                 case DirHandle: Send(BuildAttrsPacket(id, DirAttrs(DateTimeOffset.UtcNow))); return;
-                case ReadHandle rh: Send(BuildAttrsPacket(id, FileAttrs(rh.Stream.Length, DateTimeOffset.UtcNow))); return;
-                case WriteHandle: Send(BuildAttrsPacket(id, FileAttrs(0, DateTimeOffset.UtcNow))); return;
+                case ReadHandle rh: Send(BuildAttrsPacket(id, FileAttrs(rh.Size, DateTimeOffset.UtcNow))); return;
+                case WriteHandle wh: Send(BuildAttrsPacket(id, FileAttrs(wh.Position, DateTimeOffset.UtcNow))); return;
             }
         }
         SendStatus(id, SSH_FX_FAILURE);
@@ -321,6 +329,7 @@ public sealed class SftpSubsystem(
         if (ds is null) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
 
         var subPath = parts[1].EndsWith('/') ? parts[1] : parts[1] + "/";
+        await _fileStorage.CreateDirectoryAsync(ds, subPath.TrimEnd('/'));
         _sessionDirs.Add((ds.Id, subPath));
         SendStatus(id, SSH_FX_OK);
     }
@@ -339,12 +348,14 @@ public sealed class SftpSubsystem(
 
         foreach (var f in allFiles)
         {
-            if (f.Path.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase))
+            if (!f.Path.EndsWith('/') &&
+                f.Path.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 await _fileStorage.DeleteFileAsync(ds, f.Path);
             }
         }
 
+        await _fileStorage.DeleteDirectoryAsync(ds, dirPrefix.TrimEnd('/'));
         _sessionDirs.RemoveWhere(e => e.dsId == ds.Id &&
             e.virtualPath.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase));
         InvalidateCache();
@@ -368,8 +379,7 @@ public sealed class SftpSubsystem(
         {
             if (!IsAuthenticated) { SendStatus(id, SSH_FX_PERMISSION_DENIED); return; }
 
-            // Delete existing file if TRUNC/CREAT
-            if ((pflags & SSH_FXF_TRUNC) != 0 || (pflags & SSH_FXF_CREAT) != 0)
+            if ((pflags & SSH_FXF_TRUNC) != 0)
             {
                 if (await _fileStorage.ExistsAsync(ds, subPath))
                 {
@@ -395,11 +405,12 @@ public sealed class SftpSubsystem(
         }
         else
         {
-            if (!await _fileStorage.ExistsAsync(ds, subPath)) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
+            var entry = await FindEntryAsync(ds, subPath);
+            if (entry is null || entry.IsDir) { SendStatus(id, SSH_FX_NO_SUCH_FILE); return; }
 
             var stream = await _fileStorage.OpenDecryptedStreamAsync(ds, subPath);
             var handle = NextHandle();
-            _handles[handle] = new ReadHandle(ds, subPath, stream, 0);
+            _handles[handle] = new ReadHandle(ds, subPath, stream, 0, entry.Size);
             Send(BuildHandlePacket(id, handle));
         }
     }
@@ -407,6 +418,16 @@ public sealed class SftpSubsystem(
     private async Task HandleRead(uint id, string handle, ulong offset, uint len)
     {
         if (!_handles.TryGetValue(handle, out var h) || h is not ReadHandle rh) { SendStatus(id, SSH_FX_FAILURE); return; }
+
+        if ((long)offset < rh.Position)
+        {
+            await rh.Stream.DisposeAsync();
+            rh = rh with
+            {
+                Stream = await _fileStorage.OpenDecryptedStreamAsync(rh.Ds, rh.RelativePath),
+                Position = 0
+            };
+        }
 
         if ((long)offset > rh.Position)
         {
@@ -417,12 +438,17 @@ public sealed class SftpSubsystem(
                 var read = await rh.Stream.ReadAsync(skipBuf.AsMemory(0, (int)Math.Min(skipBuf.Length, toSkip)));
                 if (read == 0) break;
                 toSkip -= read;
+                rh = rh with { Position = rh.Position + read };
             }
-        }
-        else if ((long)offset < rh.Position)
-        {
-            SendStatus(id, SSH_FX_FAILURE, "Backward seek not supported");
-            return;
+
+            if (toSkip > 0)
+            {
+                _handles[handle] = rh;
+                SendStatus(id, SSH_FX_EOF);
+                return;
+            }
+
+            _handles[handle] = rh;
         }
 
         var readLen = (int)Math.Min(len, 32768);
@@ -520,13 +546,32 @@ public sealed class SftpSubsystem(
 
         var allFiles = await _fileStorage.ListFilesAsync(ds);
         var moved = 0;
+        var sourceDirectories = new List<string>();
 
         foreach (var f in allFiles)
         {
             if (!f.Path.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase)) continue;
             var newFilePath = newPrefix + f.Path[oldPrefix.Length..];
-            await _fileStorage.RenameFileAsync(ds, f.Path, newFilePath);
+            if (f.Path.EndsWith('/'))
+            {
+                await _fileStorage.CreateDirectoryAsync(ds, newFilePath.TrimEnd('/'));
+                sourceDirectories.Add(f.Path.TrimEnd('/'));
+            }
+            else
+            {
+                await _fileStorage.RenameFileAsync(ds, f.Path, newFilePath);
+            }
             moved++;
+        }
+
+        foreach (var directory in sourceDirectories.OrderByDescending(p => p.Length))
+        {
+            await _fileStorage.DeleteDirectoryAsync(ds, directory);
+        }
+
+        if (moved > 0)
+        {
+            await _fileStorage.DeleteDirectoryAsync(ds, oldPrefix.TrimEnd('/'));
         }
 
         // Update session-tracked dirs
@@ -584,11 +629,24 @@ public sealed class SftpSubsystem(
                 continue;
 
             var relativePath = string.IsNullOrEmpty(pathPrefix) ? f.Path : f.Path[pathPrefix.Length..];
+            var isDirectoryMarker = relativePath.EndsWith('/');
+            relativePath = relativePath.TrimEnd('/');
+            if (string.IsNullOrEmpty(relativePath))
+                continue;
+
             var slashIdx = relativePath.IndexOf('/');
 
             if (slashIdx < 0)
             {
-                entries.Add(new VfsEntry(relativePath, false, f.StoredSize, f.Modified ?? DateTimeOffset.UtcNow));
+                if (isDirectoryMarker)
+                {
+                    if (seenFolders.Add(relativePath))
+                        entries.Add(new VfsEntry(relativePath, true, 0, f.Modified ?? DateTimeOffset.UtcNow));
+                }
+                else
+                {
+                    entries.Add(new VfsEntry(relativePath, false, f.StoredSize, f.Modified ?? DateTimeOffset.UtcNow));
+                }
             }
             else
             {
