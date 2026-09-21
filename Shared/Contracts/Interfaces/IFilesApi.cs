@@ -19,7 +19,7 @@ public interface IFilesApi
     Task DeleteFolderAsync([Query] Guid dataSourceId, [Query] string path);
 
     [Post("/api/files/folder")]
-    Task CreateFolderAsync([Query] Guid dataSourceId, [Query] string path, [Query] string name);
+    Task CreateFolderAsync([Query] Guid dataSourceId, [Query] string name, [Query] string? path = null);
 
     [Post("/api/files/move-folder")]
     Task MoveFolderAsync([Query] Guid dataSourceId, [Query] string sourcePath, [Query] string destinationPath);

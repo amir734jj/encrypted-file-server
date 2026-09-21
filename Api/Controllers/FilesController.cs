@@ -218,8 +218,8 @@ public sealed class FilesController(
     [HttpPost("folder")]
     public async Task<IActionResult> CreateFolder(
         [FromQuery] Guid dataSourceId,
-        [FromQuery] string path,
-        [FromQuery] string name)
+        [FromQuery] string name,
+        [FromQuery] string? path = null)
     {
         name = name?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(name) ||

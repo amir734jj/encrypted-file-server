@@ -202,10 +202,6 @@ else
                     <HxButton Color="ThemeColor.Secondary" OnClick="CancelCreateFolder">Cancel</HxButton>
                     <HxButton Color="ThemeColor.Primary" OnClick="CreateFolder"
                               Enabled="@(!string.IsNullOrWhiteSpace(_newFolderName) && !_creatingFolderRequest)">
-                        @if (_creatingFolderRequest)
-                        {
-                            <span class="spinner-border spinner-border-sm me-1"></span>
-                        }
                         <i class="bi bi-folder-plus me-1"></i> Create
                     </HxButton>
                 </div>
@@ -360,7 +356,7 @@ else
         _creatingFolderRequest = true;
         try
         {
-            await Api.CreateFolderAsync(DataSourceId, Path ?? "", name);
+            await Api.CreateFolderAsync(DataSourceId, Path, name);
             _creatingFolder = false;
             _newFolderName = string.Empty;
             await LoadAsync();
