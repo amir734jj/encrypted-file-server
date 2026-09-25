@@ -95,7 +95,7 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
             return false;
         }
 
-        await client.DeleteDirectory(storagePath, ct);
+        await client.DeleteDirectory(storagePath, FtpListOption.AllFiles, ct);
         logger.LogInformation("FTP DeleteDirectory: deleted {StoragePath}", storagePath);
         return true;
     }
@@ -172,7 +172,7 @@ public sealed class FtpBackendStorageProvider(ILogger<FtpBackendStorageProvider>
         FtpListItem[] items;
         try
         {
-            items = await client.GetListing(remotePath, ct);
+            items = await client.GetListing(remotePath, FtpListOption.AllFiles, ct);
         }
         catch (Exception ex)
         {
